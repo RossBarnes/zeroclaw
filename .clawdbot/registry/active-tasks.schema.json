@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ClawdBot Active Tasks Registry",
+  "type": "object",
+  "required": ["version", "tasks"],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "description", "status", "agent_type", "branch", "base_branch", "created_at"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9-]+$"
+          },
+          "description": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["queued", "running", "pr_open", "done", "blocked", "failed"]
+          },
+          "agent_type": {
+            "type": "string",
+            "enum": ["codex", "claude"]
+          },
+          "branch": {
+            "type": "string"
+          },
+          "base_branch": {
+            "type": "string"
+          },
+          "worktree_path": {
+            "type": "string"
+          },
+          "pr_number": {
+            "type": ["integer", "null"]
+          },
+          "pr_url": {
+            "type": ["string", "null"]
+          },
+          "failure_reason": {
+            "type": ["string", "null"]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    }
+  }
+}

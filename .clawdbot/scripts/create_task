@@ -1,0 +1,175 @@
+#!/usr/bin/env bash
+# create_task — Create a new agent swarm task with an isolated git worktree.
+#
+# Usage: create_task <task-id> <description> [base-branch] [repo-path] [agent-type]
+#
+# Environment:
+#   AGENT_SWARM_HOME  — root workspace (default: ~/agent-swarm)
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# Constants / defaults
+# ---------------------------------------------------------------------------
+SWARM_HOME="${AGENT_SWARM_HOME:-$HOME/agent-swarm}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CLAWDBOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+REGISTRY="$CLAWDBOT_DIR/registry/active-tasks.json"
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+die()  { echo "error: $*" >&2; exit 1; }
+info() { echo ":: $*"; }
+
+ensure_jq() {
+  command -v jq >/dev/null 2>&1 || die "jq is required but not installed. Install it with: apt-get install jq"
+}
+
+ensure_registry() {
+  if [ ! -f "$REGISTRY" ]; then
+    mkdir -p "$(dirname "$REGISTRY")"
+    echo '{"version":1,"tasks":[]}' > "$REGISTRY"
+    info "Created empty registry at $REGISTRY"
+  fi
+}
+
+validate_task_id() {
+  local id="$1"
+  if [[ ! "$id" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]*$ ]]; then
+    die "Invalid task id '$id'. Must be alphanumeric + hyphens, starting with alphanumeric."
+  fi
+  if [ ${#id} -gt 64 ]; then
+    die "Task id too long (max 64 chars)."
+  fi
+}
+
+task_exists() {
+  local id="$1"
+  jq -e --arg id "$id" '.tasks[] | select(.id == $id)' "$REGISTRY" >/dev/null 2>&1
+}
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+main() {
+  if [ $# -lt 2 ]; then
+    echo "Usage: create_task <task-id> <description> [base-branch] [repo-path] [agent-type]" >&2
+    exit 1
+  fi
+
+  local task_id="$1"
+  local description="$2"
+  local base_branch="${3:-origin/main}"
+  local repo_path="${4:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+  local agent_type="${5:-claude}"
+
+  ensure_jq
+  validate_task_id "$task_id"
+
+  # Validate agent type
+  case "$agent_type" in
+    codex|claude) ;;
+    *) die "Unknown agent type '$agent_type'. Must be 'codex' or 'claude'." ;;
+  esac
+
+  ensure_registry
+
+  # Check for duplicate
+  if task_exists "$task_id"; then
+    die "Task '$task_id' already exists in registry."
+  fi
+
+  local branch="feat/$task_id"
+  local worktree_path="$SWARM_HOME/worktrees/$task_id"
+
+  # Ensure swarm home exists
+  mkdir -p "$SWARM_HOME/worktrees"
+
+  # Fetch latest from remote so base branch is available
+  info "Fetching latest from remote..."
+  git -C "$repo_path" fetch origin 2>/dev/null || info "Warning: git fetch failed (offline?). Continuing with local state."
+
+  # Create worktree with new branch
+  if [ -d "$worktree_path" ]; then
+    die "Worktree directory already exists at $worktree_path"
+  fi
+
+  info "Creating worktree at $worktree_path (branch: $branch)"
+  git -C "$repo_path" worktree add -b "$branch" "$worktree_path" "$base_branch" 2>/dev/null \
+    || git -C "$repo_path" worktree add "$worktree_path" "$branch" 2>/dev/null \
+    || die "Failed to create worktree. Branch '$branch' may already exist — check with: git branch -l '$branch'"
+
+  # Create prompt stub
+  local prompt_file="$CLAWDBOT_DIR/prompts/$task_id.md"
+  cat > "$prompt_file" <<PROMPT
+# Task: $task_id
+
+## Problem Statement
+
+$description
+
+## Acceptance Criteria
+
+- [ ] (fill in acceptance criteria)
+
+## Definition of Done
+
+See: .clawdbot/policies/definition-of-done.md
+
+- [ ] PR exists targeting $base_branch
+- [ ] CI checks pass
+- [ ] No merge conflicts
+- [ ] Screenshot included (if UI changes)
+
+## File Scope
+
+(list key files or directories to modify)
+
+## Notes
+
+(additional context for the agent)
+PROMPT
+
+  info "Created prompt file at $prompt_file"
+
+  # Add entry to registry
+  local now
+  now="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+  local tmp
+  tmp="$(mktemp)"
+  jq --arg id "$task_id" \
+     --arg desc "$description" \
+     --arg agent "$agent_type" \
+     --arg branch "$branch" \
+     --arg base "$base_branch" \
+     --arg wt "$worktree_path" \
+     --arg now "$now" \
+     '.tasks += [{
+       id: $id,
+       description: $desc,
+       status: "queued",
+       agent_type: $agent,
+       branch: $branch,
+       base_branch: $base,
+       worktree_path: $wt,
+       pr_number: null,
+       pr_url: null,
+       failure_reason: null,
+       created_at: $now,
+       updated_at: $now
+     }]' "$REGISTRY" > "$tmp" && mv "$tmp" "$REGISTRY"
+
+  info "Task '$task_id' created successfully."
+  info "  Status:    queued"
+  info "  Branch:    $branch"
+  info "  Worktree:  $worktree_path"
+  info "  Prompt:    $prompt_file"
+  info "  Agent:     $agent_type"
+  info ""
+  info "Next steps:"
+  info "  1. Edit the prompt: $prompt_file"
+  info "  2. Spawn the agent: clawdbot spawn $task_id"
+}
+
+main "$@"

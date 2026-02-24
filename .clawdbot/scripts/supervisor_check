@@ -1,0 +1,253 @@
+#!/usr/bin/env bash
+# supervisor_check — Deterministic status check for all active tasks.
+#
+# Iterates tasks in active-tasks.json that are "running" or "pr_open",
+# queries GitHub via `gh`, and updates task status accordingly.
+#
+# Usage: supervisor_check
+#
+# Environment:
+#   AGENT_SWARM_HOME — root workspace (default: ~/agent-swarm)
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# Constants / defaults
+# ---------------------------------------------------------------------------
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CLAWDBOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+REGISTRY="$CLAWDBOT_DIR/registry/active-tasks.json"
+LOGS_DIR="$CLAWDBOT_DIR/logs"
+NOTIFY_LOG="$LOGS_DIR/notifications.log"
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+die()  { echo "error: $*" >&2; exit 1; }
+info() { echo ":: $*"; }
+warn() { echo "warn: $*" >&2; }
+
+ensure_jq() {
+  command -v jq >/dev/null 2>&1 || die "jq is required but not installed."
+}
+
+ensure_gh() {
+  if ! command -v gh >/dev/null 2>&1; then
+    die "GitHub CLI (gh) is required but not installed. Install: https://cli.github.com/"
+  fi
+  if ! gh auth status >/dev/null 2>&1; then
+    warn "gh is not authenticated. Tasks will be marked as blocked."
+    return 1
+  fi
+  return 0
+}
+
+update_task() {
+  local id="$1" status="$2" reason="${3:-}" pr_num="${4:-}" pr_url="${5:-}"
+  local now
+  now="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  local tmp
+  tmp="$(mktemp)"
+
+  jq --arg id "$id" \
+     --arg s "$status" \
+     --arg now "$now" \
+     --arg reason "$reason" \
+     --arg prn "$pr_num" \
+     --arg pru "$pr_url" \
+     '(.tasks[] | select(.id == $id)) |= (
+       .status = $s |
+       .updated_at = $now |
+       (if $reason != "" then .failure_reason = $reason else . end) |
+       (if $prn != "" then .pr_number = ($prn | tonumber) else . end) |
+       (if $pru != "" then .pr_url = $pru else . end)
+     )' "$REGISTRY" > "$tmp" && mv "$tmp" "$REGISTRY"
+}
+
+notify() {
+  local msg="$1"
+  echo "$msg"
+  mkdir -p "$LOGS_DIR"
+  echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ")] $msg" >> "$NOTIFY_LOG"
+}
+
+# Check if PR body contains screenshot for UI changes
+check_screenshot_required() {
+  local pr_number="$1" branch="$2" repo_path="$3"
+
+  # Get changed files from the PR
+  local changed_files
+  changed_files="$(gh pr diff "$pr_number" --name-only 2>/dev/null || echo "")"
+
+  if [ -z "$changed_files" ]; then
+    return 0  # Can't determine, pass
+  fi
+
+  local needs_screenshot=false
+  while IFS= read -r file; do
+    case "$file" in
+      ui/*|components/*|*.tsx|*.css)
+        needs_screenshot=true
+        break
+        ;;
+    esac
+  done <<< "$changed_files"
+
+  if [ "$needs_screenshot" = true ]; then
+    local pr_body
+    pr_body="$(gh pr view "$pr_number" --json body -q '.body' 2>/dev/null || echo "")"
+    if ! echo "$pr_body" | grep -qi "^Screenshot:"; then
+      return 1  # Screenshot missing
+    fi
+  fi
+
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+main() {
+  ensure_jq
+
+  if [ ! -f "$REGISTRY" ]; then
+    info "No registry found. Nothing to check."
+    exit 0
+  fi
+
+  local gh_ok=true
+  ensure_gh || gh_ok=false
+
+  # Get tasks that need checking
+  local task_ids
+  task_ids="$(jq -r '.tasks[] | select(.status == "running" or .status == "pr_open") | .id' "$REGISTRY")"
+
+  if [ -z "$task_ids" ]; then
+    info "No active tasks to check."
+    exit 0
+  fi
+
+  info "Checking $(echo "$task_ids" | wc -l | tr -d ' ') active task(s)..."
+  echo ""
+
+  while IFS= read -r task_id; do
+    [ -z "$task_id" ] && continue
+
+    local status branch base_branch
+    status="$(jq -r --arg id "$task_id" '.tasks[] | select(.id == $id) | .status' "$REGISTRY")"
+    branch="$(jq -r --arg id "$task_id" '.tasks[] | select(.id == $id) | .branch' "$REGISTRY")"
+    base_branch="$(jq -r --arg id "$task_id" '.tasks[] | select(.id == $id) | .base_branch' "$REGISTRY")"
+
+    info "Task: $task_id (status: $status, branch: $branch)"
+
+    # If gh is not authenticated, block all tasks
+    if [ "$gh_ok" = false ]; then
+      update_task "$task_id" "blocked" "gh CLI not authenticated. Run: gh auth login"
+      info "  -> blocked (gh not authenticated)"
+      echo ""
+      continue
+    fi
+
+    # Check if branch exists remotely
+    local remote_branch_exists=false
+    if git ls-remote --heads origin "$branch" 2>/dev/null | grep -q "$branch"; then
+      remote_branch_exists=true
+    fi
+
+    if [ "$remote_branch_exists" = false ]; then
+      if [ "$status" = "running" ]; then
+        info "  -> still running (no remote branch yet)"
+      else
+        info "  -> branch not found remotely"
+      fi
+      echo ""
+      continue
+    fi
+
+    # Check for open PR
+    local pr_json
+    pr_json="$(gh pr list --head "$branch" --json number,title,url,state,mergeable,mergeStateStatus --limit 1 2>/dev/null || echo "[]")"
+    local pr_count
+    pr_count="$(echo "$pr_json" | jq 'length')"
+
+    if [ "$pr_count" -eq 0 ]; then
+      if [ "$status" = "running" ]; then
+        info "  -> still running (no PR yet)"
+      else
+        info "  -> no open PR found"
+      fi
+      echo ""
+      continue
+    fi
+
+    local pr_number pr_title pr_url mergeable merge_state
+    pr_number="$(echo "$pr_json" | jq -r '.[0].number')"
+    pr_title="$(echo "$pr_json" | jq -r '.[0].title')"
+    pr_url="$(echo "$pr_json" | jq -r '.[0].url')"
+    mergeable="$(echo "$pr_json" | jq -r '.[0].mergeable // "UNKNOWN"')"
+    merge_state="$(echo "$pr_json" | jq -r '.[0].mergeStateStatus // "UNKNOWN"')"
+
+    info "  PR #$pr_number: $pr_title"
+    info "  URL: $pr_url"
+
+    # If task was running and PR now exists, transition to pr_open
+    if [ "$status" = "running" ]; then
+      update_task "$task_id" "pr_open" "" "$pr_number" "$pr_url"
+      status="pr_open"
+      info "  -> status updated: running -> pr_open"
+    fi
+
+    # Check merge conflicts
+    if [ "$mergeable" = "CONFLICTING" ]; then
+      update_task "$task_id" "blocked" "Merge conflicts detected" "$pr_number" "$pr_url"
+      info "  -> blocked (merge conflicts)"
+      echo ""
+      continue
+    fi
+
+    # Check CI status via check runs
+    local checks_json
+    checks_json="$(gh pr checks "$pr_number" --json name,state,conclusion 2>/dev/null || echo "[]")"
+
+    local total_checks passing_checks failing_checks pending_checks
+    total_checks="$(echo "$checks_json" | jq 'length')"
+    passing_checks="$(echo "$checks_json" | jq '[.[] | select(.conclusion == "SUCCESS" or .conclusion == "success")] | length')"
+    failing_checks="$(echo "$checks_json" | jq '[.[] | select(.conclusion == "FAILURE" or .conclusion == "failure" or .conclusion == "ERROR" or .conclusion == "error")] | length')"
+    pending_checks="$(echo "$checks_json" | jq '[.[] | select(.state == "PENDING" or .state == "pending" or .state == "QUEUED" or .state == "queued" or .conclusion == "" or .conclusion == null)] | length')"
+
+    info "  Checks: $total_checks total, $passing_checks passing, $failing_checks failing, $pending_checks pending"
+
+    if [ "$failing_checks" -gt 0 ]; then
+      local failed_names
+      failed_names="$(echo "$checks_json" | jq -r '[.[] | select(.conclusion == "FAILURE" or .conclusion == "failure" or .conclusion == "ERROR" or .conclusion == "error")] | map(.name) | join(", ")')"
+      update_task "$task_id" "failed" "CI checks failing: $failed_names" "$pr_number" "$pr_url"
+      info "  -> failed (CI: $failed_names)"
+      echo ""
+      continue
+    fi
+
+    if [ "$pending_checks" -gt 0 ]; then
+      info "  -> pr_open (CI still pending)"
+      echo ""
+      continue
+    fi
+
+    # All checks passing — verify definition of done
+    # Screenshot check for UI changes
+    if ! check_screenshot_required "$pr_number" "$branch" ""; then
+      update_task "$task_id" "blocked" "UI changes detected but no 'Screenshot:' line in PR body" "$pr_number" "$pr_url"
+      info "  -> blocked (screenshot required for UI changes)"
+      echo ""
+      continue
+    fi
+
+    # All checks pass!
+    update_task "$task_id" "done" "" "$pr_number" "$pr_url"
+    notify "PR #$pr_number ready for review: $pr_title ($pr_url)"
+    echo ""
+
+  done <<< "$task_ids"
+
+  info "Supervisor check complete."
+}
+
+main "$@"

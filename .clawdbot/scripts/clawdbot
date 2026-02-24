@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+# clawdbot — Agent swarm orchestration CLI for ZeroClaw.
+#
+# Usage:
+#   clawdbot create <task-id> "<description>" [agent-type]
+#   clawdbot spawn  <task-id>
+#   clawdbot check
+#   clawdbot status [task-id]
+#   clawdbot validate
+#   clawdbot help
+#
+# Environment:
+#   AGENT_SWARM_HOME           — workspace root (default: ~/agent-swarm)
+#   AGENT_SWARM_MAX_PARALLEL   — max concurrent agents (default: 1)
+#   CLAWDBOT_USE_TMUX          — set to 1 to use tmux sessions (default: 0)
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CLAWDBOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+REGISTRY="$CLAWDBOT_DIR/registry/active-tasks.json"
+VERSION="0.1.0"
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+die()  { echo "error: $*" >&2; exit 1; }
+
+print_help() {
+  cat <<'EOF'
+clawdbot — Agent Swarm Orchestration for ZeroClaw
+
+Usage:
+  clawdbot create <task-id> "<description>" [agent-type]
+  clawdbot spawn  <task-id>
+  clawdbot check
+  clawdbot status [task-id]
+  clawdbot validate
+  clawdbot help
+  clawdbot version
+
+Commands:
+  create    Create a new task with an isolated git worktree
+            agent-type: codex | claude (default: claude)
+
+  spawn     Launch a coding agent against a task worktree
+
+  check     Run supervisor check on all active tasks (uses gh CLI)
+
+  status    Show task status (all tasks, or a specific task by id)
+
+  validate  Validate the active-tasks.json registry schema
+
+  help      Show this help message
+
+  version   Show version
+
+Environment Variables:
+  AGENT_SWARM_HOME           Workspace root directory (default: ~/agent-swarm)
+  AGENT_SWARM_MAX_PARALLEL   Max concurrent agents (default: 1)
+  CLAWDBOT_USE_TMUX          Use tmux for agent sessions (default: 0)
+
+Examples:
+  clawdbot create fix-auth "Fix the OAuth token refresh bug"
+  clawdbot create add-search "Add full-text search to memory" codex
+  clawdbot spawn fix-auth
+  clawdbot check
+  clawdbot status fix-auth
+EOF
+}
+
+print_status() {
+  local task_id="${1:-}"
+
+  if ! command -v jq >/dev/null 2>&1; then
+    die "jq is required but not installed."
+  fi
+
+  if [ ! -f "$REGISTRY" ]; then
+    echo "No registry found. No tasks created yet."
+    return
+  fi
+
+  if [ -n "$task_id" ]; then
+    # Single task
+    local task
+    task="$(jq --arg id "$task_id" '.tasks[] | select(.id == $id)' "$REGISTRY")"
+    if [ -z "$task" ]; then
+      die "Task '$task_id' not found."
+    fi
+    echo "$task" | jq '.'
+  else
+    # All tasks
+    local count
+    count="$(jq '.tasks | length' "$REGISTRY")"
+    echo "Tasks: $count total"
+    echo ""
+    if [ "$count" -eq 0 ]; then
+      echo "No tasks. Create one with: clawdbot create <task-id> \"<description>\""
+      return
+    fi
+    printf "  %-24s %-10s %-8s %-30s %s\n" "ID" "STATUS" "AGENT" "BRANCH" "DESCRIPTION"
+    printf "  %-24s %-10s %-8s %-30s %s\n" "---" "---" "---" "---" "---"
+    jq -r '.tasks[] | "\(.id)|\(.status)|\(.agent_type)|\(.branch)|\(.description[0:50])"' "$REGISTRY" | while IFS='|' read -r tid tstatus tagent tbranch tdesc; do
+      printf "  %-24s %-10s %-8s %-30s %s\n" "$tid" "$tstatus" "$tagent" "$tbranch" "$tdesc"
+    done
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Main dispatch
+# ---------------------------------------------------------------------------
+main() {
+  if [ $# -lt 1 ]; then
+    print_help
+    exit 1
+  fi
+
+  local cmd="$1"
+  shift
+
+  case "$cmd" in
+    create)
+      if [ $# -lt 2 ]; then
+        echo "Usage: clawdbot create <task-id> \"<description>\" [agent-type]" >&2
+        exit 1
+      fi
+      local task_id="$1"
+      local description="$2"
+      local agent_type="${3:-claude}"
+      exec "$SCRIPT_DIR/create_task" "$task_id" "$description" "origin/main" "" "$agent_type"
+      ;;
+
+    spawn)
+      if [ $# -lt 1 ]; then
+        echo "Usage: clawdbot spawn <task-id>" >&2
+        exit 1
+      fi
+      exec "$SCRIPT_DIR/spawn_agent" "$1"
+      ;;
+
+    check)
+      exec "$SCRIPT_DIR/supervisor_check"
+      ;;
+
+    status)
+      print_status "${1:-}"
+      ;;
+
+    validate)
+      exec "$SCRIPT_DIR/validate_registry"
+      ;;
+
+    version)
+      echo "clawdbot $VERSION"
+      ;;
+
+    help|--help|-h)
+      print_help
+      ;;
+
+    *)
+      die "Unknown command: $cmd. Run 'clawdbot help' for usage."
+      ;;
+  esac
+}
+
+main "$@"

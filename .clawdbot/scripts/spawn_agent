@@ -1,0 +1,196 @@
+#!/usr/bin/env bash
+# spawn_agent — Launch a coding agent (Claude Code or Codex) against a task worktree.
+#
+# Usage: spawn_agent <task-id>
+#
+# Environment:
+#   AGENT_SWARM_HOME      — root workspace (default: ~/agent-swarm)
+#   AGENT_SWARM_MAX_PARALLEL — max concurrent agents (default: 1)
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# Constants / defaults
+# ---------------------------------------------------------------------------
+SWARM_HOME="${AGENT_SWARM_HOME:-$HOME/agent-swarm}"
+MAX_PARALLEL="${AGENT_SWARM_MAX_PARALLEL:-1}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CLAWDBOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+REGISTRY="$CLAWDBOT_DIR/registry/active-tasks.json"
+LOGS_DIR="$CLAWDBOT_DIR/logs"
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+die()  { echo "error: $*" >&2; exit 1; }
+info() { echo ":: $*"; }
+
+ensure_jq() {
+  command -v jq >/dev/null 2>&1 || die "jq is required but not installed."
+}
+
+get_task_field() {
+  local id="$1" field="$2"
+  jq -r --arg id "$id" --arg f "$field" '.tasks[] | select(.id == $id) | .[$f]' "$REGISTRY"
+}
+
+update_task_status() {
+  local id="$1" status="$2"
+  local now
+  now="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  local tmp
+  tmp="$(mktemp)"
+  jq --arg id "$id" --arg s "$status" --arg now "$now" \
+     '(.tasks[] | select(.id == $id)) |= (.status = $s | .updated_at = $now)' \
+     "$REGISTRY" > "$tmp" && mv "$tmp" "$REGISTRY"
+}
+
+count_running() {
+  jq '[.tasks[] | select(.status == "running")] | length' "$REGISTRY"
+}
+
+install_deps_if_needed() {
+  local wt="$1"
+  if [ -f "$wt/pnpm-lock.yaml" ]; then
+    info "Installing deps with pnpm..."
+    (cd "$wt" && pnpm install --frozen-lockfile 2>/dev/null) || info "Warning: pnpm install failed."
+  elif [ -f "$wt/package-lock.json" ]; then
+    info "Installing deps with npm..."
+    (cd "$wt" && npm ci 2>/dev/null) || info "Warning: npm ci failed."
+  elif [ -f "$wt/yarn.lock" ]; then
+    info "Installing deps with yarn..."
+    (cd "$wt" && yarn install --frozen-lockfile 2>/dev/null) || info "Warning: yarn install failed."
+  elif [ -f "$wt/Cargo.toml" ]; then
+    info "Rust project detected. Dependencies handled by cargo on build."
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+main() {
+  if [ $# -lt 1 ]; then
+    echo "Usage: spawn_agent <task-id>" >&2
+    exit 1
+  fi
+
+  local task_id="$1"
+  ensure_jq
+
+  # Validate task exists
+  if ! jq -e --arg id "$task_id" '.tasks[] | select(.id == $id)' "$REGISTRY" >/dev/null 2>&1; then
+    die "Task '$task_id' not found in registry. Create it first with: clawdbot create $task_id \"description\""
+  fi
+
+  local status
+  status="$(get_task_field "$task_id" "status")"
+
+  case "$status" in
+    queued) ;;
+    running) die "Task '$task_id' is already running." ;;
+    done)    die "Task '$task_id' is already done." ;;
+    *)       info "Warning: Task status is '$status'. Attempting to spawn anyway." ;;
+  esac
+
+  # Check parallel limit
+  local running
+  running="$(count_running)"
+  if [ "$running" -ge "$MAX_PARALLEL" ]; then
+    die "Max parallel agents ($MAX_PARALLEL) already running. Wait or increase AGENT_SWARM_MAX_PARALLEL."
+  fi
+
+  local agent_type worktree_path prompt_file
+  agent_type="$(get_task_field "$task_id" "agent_type")"
+  worktree_path="$(get_task_field "$task_id" "worktree_path")"
+  prompt_file="$CLAWDBOT_DIR/prompts/$task_id.md"
+
+  # Validate worktree
+  if [ ! -d "$worktree_path" ]; then
+    die "Worktree not found at $worktree_path. Recreate the task or fix the path."
+  fi
+
+  # Validate prompt file
+  if [ ! -f "$prompt_file" ]; then
+    die "Prompt file not found at $prompt_file."
+  fi
+
+  # Install deps if needed
+  install_deps_if_needed "$worktree_path"
+
+  # Ensure log directory
+  mkdir -p "$LOGS_DIR"
+  local log_file="$LOGS_DIR/$task_id.log"
+
+  info "Launching $agent_type agent for task '$task_id'..."
+  info "  Worktree: $worktree_path"
+  info "  Prompt:   $prompt_file"
+  info "  Log:      $log_file"
+
+  # Update status to running
+  update_task_status "$task_id" "running"
+
+  # Read prompt content
+  local prompt_content
+  prompt_content="$(cat "$prompt_file")"
+
+  # Launch agent
+  local use_tmux=false
+  if command -v tmux >/dev/null 2>&1 && [ "${CLAWDBOT_USE_TMUX:-0}" = "1" ]; then
+    use_tmux=true
+  fi
+
+  case "$agent_type" in
+    claude)
+      if ! command -v claude >/dev/null 2>&1; then
+        update_task_status "$task_id" "blocked"
+        die "claude CLI not found. Install Claude Code: https://docs.anthropic.com/en/docs/claude-code"
+      fi
+
+      if [ "$use_tmux" = true ]; then
+        local session="clawdbot-$task_id"
+        info "Starting in tmux session: $session"
+        tmux new-session -d -s "$session" -c "$worktree_path" \
+          "claude -p \"$prompt_file\" 2>&1 | tee -a \"$log_file\"; echo '[clawdbot] Agent exited. Press enter to close.'; read"
+        info "Agent running in tmux. Attach with: tmux attach -t $session"
+      else
+        info "Running agent in foreground (stdout+stderr -> log)..."
+        (
+          cd "$worktree_path"
+          claude -p "$prompt_file" 2>&1 | tee -a "$log_file"
+        )
+        info "Agent process exited."
+      fi
+      ;;
+
+    codex)
+      if ! command -v codex >/dev/null 2>&1; then
+        update_task_status "$task_id" "blocked"
+        die "codex CLI not found. Install OpenAI Codex CLI."
+      fi
+
+      if [ "$use_tmux" = true ]; then
+        local session="clawdbot-$task_id"
+        info "Starting in tmux session: $session"
+        tmux new-session -d -s "$session" -c "$worktree_path" \
+          "codex --prompt-file \"$prompt_file\" 2>&1 | tee -a \"$log_file\"; echo '[clawdbot] Agent exited. Press enter to close.'; read"
+        info "Agent running in tmux. Attach with: tmux attach -t $session"
+      else
+        info "Running agent in foreground (stdout+stderr -> log)..."
+        (
+          cd "$worktree_path"
+          codex --prompt-file "$prompt_file" 2>&1 | tee -a "$log_file"
+        )
+        info "Agent process exited."
+      fi
+      ;;
+
+    *)
+      update_task_status "$task_id" "failed"
+      die "Unknown agent type: $agent_type"
+      ;;
+  esac
+
+  info "Spawn complete for task '$task_id'."
+  info "Run 'clawdbot check' to evaluate task status via GitHub."
+}
+
+main "$@"

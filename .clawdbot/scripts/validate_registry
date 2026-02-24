@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+# validate_registry — Validate the active-tasks.json registry against its schema.
+#
+# Performs structural validation using jq (no external schema validator needed).
+#
+# Usage: validate_registry
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CLAWDBOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+REGISTRY="$CLAWDBOT_DIR/registry/active-tasks.json"
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+die()   { echo "FAIL: $*" >&2; exit 1; }
+pass()  { echo "PASS: $*"; }
+info()  { echo ":: $*"; }
+
+errors=0
+fail() { echo "FAIL: $*" >&2; errors=$((errors + 1)); }
+
+ensure_jq() {
+  command -v jq >/dev/null 2>&1 || die "jq is required but not installed."
+}
+
+# ---------------------------------------------------------------------------
+# Validation checks
+# ---------------------------------------------------------------------------
+main() {
+  ensure_jq
+
+  info "Validating registry: $REGISTRY"
+  echo ""
+
+  # Check file exists
+  if [ ! -f "$REGISTRY" ]; then
+    die "Registry file not found at $REGISTRY"
+  fi
+  pass "Registry file exists"
+
+  # Check valid JSON
+  if ! jq empty "$REGISTRY" 2>/dev/null; then
+    die "Registry is not valid JSON"
+  fi
+  pass "Valid JSON"
+
+  # Check version field
+  local version
+  version="$(jq -r '.version // empty' "$REGISTRY")"
+  if [ -z "$version" ]; then
+    fail "Missing 'version' field"
+  elif [ "$version" != "1" ]; then
+    fail "Unexpected version: $version (expected: 1)"
+  else
+    pass "Version field is 1"
+  fi
+
+  # Check tasks array exists
+  if ! jq -e '.tasks | type == "array"' "$REGISTRY" >/dev/null 2>&1; then
+    die "'tasks' field must be an array"
+  fi
+  pass "Tasks field is an array"
+
+  # Validate each task
+  local task_count
+  task_count="$(jq '.tasks | length' "$REGISTRY")"
+  info "Found $task_count task(s)"
+
+  local valid_statuses='["queued","running","pr_open","done","blocked","failed"]'
+  local valid_agents='["codex","claude"]'
+
+  for i in $(seq 0 $((task_count - 1))); do
+    local tid
+    tid="$(jq -r ".tasks[$i].id // empty" "$REGISTRY")"
+
+    if [ -z "$tid" ]; then
+      fail "Task [$i]: missing 'id' field"
+      continue
+    fi
+
+    # Validate id format
+    if [[ ! "$tid" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]*$ ]]; then
+      fail "Task '$tid': id contains invalid characters"
+    fi
+
+    # Required fields
+    for field in description status agent_type branch base_branch created_at; do
+      local val
+      val="$(jq -r ".tasks[$i].$field // empty" "$REGISTRY" 2>/dev/null || echo "")"
+      if [ -z "$val" ]; then
+        fail "Task '$tid': missing required field '$field'"
+      fi
+    done
+
+    # Validate status
+    local task_status
+    task_status="$(jq -r ".tasks[$i].status" "$REGISTRY")"
+    if ! echo "$valid_statuses" | jq -e --arg s "$task_status" 'index($s) != null' >/dev/null 2>&1; then
+      fail "Task '$tid': invalid status '$task_status'"
+    fi
+
+    # Validate agent_type
+    local task_agent
+    task_agent="$(jq -r ".tasks[$i].agent_type" "$REGISTRY")"
+    if ! echo "$valid_agents" | jq -e --arg a "$task_agent" 'index($a) != null' >/dev/null 2>&1; then
+      fail "Task '$tid': invalid agent_type '$task_agent'"
+    fi
+
+    # Validate branch format
+    local task_branch
+    task_branch="$(jq -r ".tasks[$i].branch" "$REGISTRY")"
+    if [[ ! "$task_branch" =~ ^feat/ ]]; then
+      fail "Task '$tid': branch '$task_branch' does not start with 'feat/'"
+    fi
+  done
+
+  # Check for duplicate IDs
+  local unique_count
+  unique_count="$(jq '[.tasks[].id] | unique | length' "$REGISTRY")"
+  if [ "$unique_count" -ne "$task_count" ]; then
+    fail "Duplicate task IDs detected"
+  else
+    pass "No duplicate task IDs"
+  fi
+
+  echo ""
+  if [ "$errors" -gt 0 ]; then
+    die "Validation failed with $errors error(s)"
+  else
+    pass "All validation checks passed ($task_count task(s))"
+  fi
+}
+
+main "$@"
