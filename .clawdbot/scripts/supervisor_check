@@ -5,23 +5,17 @@
 # queries GitHub via `gh`, and updates task status accordingly.
 #
 # Usage: supervisor_check
-#
-# Environment:
-#   AGENT_SWARM_HOME — root workspace (default: ~/agent-swarm)
 set -euo pipefail
 
-# ---------------------------------------------------------------------------
-# Constants / defaults
-# ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CLAWDBOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 REGISTRY="$CLAWDBOT_DIR/registry/active-tasks.json"
 LOGS_DIR="$CLAWDBOT_DIR/logs"
 NOTIFY_LOG="$LOGS_DIR/notifications.log"
+TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
+TELEGRAM_CHAT_ID="${TELEGRAM_CHAT_ID:-}"
+CLAWDBOT_CHECK_TMUX="${CLAWDBOT_CHECK_TMUX:-0}"
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 die()  { echo "error: $*" >&2; exit 1; }
 info() { echo ":: $*"; }
 warn() { echo "warn: $*" >&2; }
@@ -41,10 +35,14 @@ ensure_gh() {
   return 0
 }
 
+ts_now() {
+  date -u +"%Y-%m-%dT%H:%M:%SZ"
+}
+
 update_task() {
   local id="$1" status="$2" reason="${3:-}" pr_num="${4:-}" pr_url="${5:-}"
   local now
-  now="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  now="$(ts_now)"
   local tmp
   tmp="$(mktemp)"
 
@@ -57,7 +55,7 @@ update_task() {
      '(.tasks[] | select(.id == $id)) |= (
        .status = $s |
        .updated_at = $now |
-       (if $reason != "" then .failure_reason = $reason else . end) |
+       .failure_reason = (if $reason == "" then null else $reason end) |
        (if $prn != "" then .pr_number = ($prn | tonumber) else . end) |
        (if $pru != "" then .pr_url = $pru else . end)
      )' "$REGISTRY" > "$tmp" && mv "$tmp" "$REGISTRY"
@@ -67,19 +65,51 @@ notify() {
   local msg="$1"
   echo "$msg"
   mkdir -p "$LOGS_DIR"
-  echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ")] $msg" >> "$NOTIFY_LOG"
+  echo "[$(ts_now)] $msg" >> "$NOTIFY_LOG"
+
+  if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ] && command -v curl >/dev/null 2>&1; then
+    curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+      -d "chat_id=${TELEGRAM_CHAT_ID}" \
+      --data-urlencode "text=${msg}" >/dev/null 2>&1 || warn "Telegram notify failed"
+  fi
 }
 
-# Check if PR body contains screenshot for UI changes
-check_screenshot_required() {
-  local pr_number="$1" branch="$2" repo_path="$3"
+check_tmux_liveness() {
+  local session="$1"
+  if [ -z "$session" ] || [ "$session" = "null" ]; then
+    return 0
+  fi
+  if ! command -v tmux >/dev/null 2>&1; then
+    return 0
+  fi
+  tmux has-session -t "$session" 2>/dev/null
+}
 
-  # Get changed files from the PR
+branch_exists_local() {
+  local repo_path="$1" branch="$2"
+  git -C "$repo_path" show-ref --verify --quiet "refs/heads/$branch"
+}
+
+branch_exists_remote() {
+  local repo_path="$1" branch="$2"
+  git -C "$repo_path" ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1
+}
+
+gh_repo() {
+  local repo_path="$1"
+  shift
+  (cd "$repo_path" && gh "$@")
+}
+
+# Check if PR body contains screenshot for UI changes.
+check_screenshot_required() {
+  local repo_path="$1" pr_number="$2"
+
   local changed_files
-  changed_files="$(gh pr diff "$pr_number" --name-only 2>/dev/null || echo "")"
+  changed_files="$(gh_repo "$repo_path" pr diff "$pr_number" --name-only 2>/dev/null || echo "")"
 
   if [ -z "$changed_files" ]; then
-    return 0  # Can't determine, pass
+    return 0
   fi
 
   local needs_screenshot=false
@@ -94,18 +124,66 @@ check_screenshot_required() {
 
   if [ "$needs_screenshot" = true ]; then
     local pr_body
-    pr_body="$(gh pr view "$pr_number" --json body -q '.body' 2>/dev/null || echo "")"
-    if ! echo "$pr_body" | grep -qi "^Screenshot:"; then
-      return 1  # Screenshot missing
+    pr_body="$(gh_repo "$repo_path" pr view "$pr_number" --json body -q '.body' 2>/dev/null || echo "")"
+    if ! echo "$pr_body" | grep -Eiq '^Screenshot:'; then
+      return 1
     fi
   fi
 
   return 0
 }
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
+merge_state_blocks() {
+  local mergeable="$1" merge_state="$2"
+
+  if [ "$mergeable" = "CONFLICTING" ]; then
+    return 0
+  fi
+
+  # BEHIND means branch is not up to date with base branch.
+  if [ "$merge_state" = "BEHIND" ]; then
+    return 0
+  fi
+
+  return 1
+}
+
+check_ci_status() {
+  local repo_path="$1" pr_number="$2"
+  local checks_json
+
+  checks_json="$(gh_repo "$repo_path" pr checks "$pr_number" --json name,state,conclusion 2>/dev/null || echo "[]")"
+
+  local total_checks failing_checks pending_checks
+  total_checks="$(echo "$checks_json" | jq 'length')"
+  failing_checks="$(echo "$checks_json" | jq '[.[] | select((.conclusion // "") | test("^(FAILURE|failure|ERROR|error|CANCELLED|cancelled)$"))] | length')"
+  pending_checks="$(echo "$checks_json" | jq '[.[] | select((.state // "") | test("^(PENDING|pending|QUEUED|queued|IN_PROGRESS|in_progress)$") or (.conclusion == null) or (.conclusion == ""))] | length')"
+
+  # Detect minimum categories if present.
+  local lint_fail type_fail test_fail
+  lint_fail="$(echo "$checks_json" | jq '[.[] | select((.name | ascii_downcase | test("lint|clippy|fmt")) and ((.conclusion // "") | test("^(SUCCESS|success)$") | not))] | length')"
+  type_fail="$(echo "$checks_json" | jq '[.[] | select((.name | ascii_downcase | test("typecheck|type-check|tsc|typing")) and ((.conclusion // "") | test("^(SUCCESS|success)$") | not))] | length')"
+  test_fail="$(echo "$checks_json" | jq '[.[] | select((.name | ascii_downcase | test("unit|test")) and ((.conclusion // "") | test("^(SUCCESS|success)$") | not))] | length')"
+
+  jq -n \
+    --argjson total_checks "$total_checks" \
+    --argjson failing_checks "$failing_checks" \
+    --argjson pending_checks "$pending_checks" \
+    --argjson lint_fail "$lint_fail" \
+    --argjson type_fail "$type_fail" \
+    --argjson test_fail "$test_fail" \
+    --argjson checks "$checks_json" \
+    '{
+      total_checks: $total_checks,
+      failing_checks: $failing_checks,
+      pending_checks: $pending_checks,
+      lint_fail: $lint_fail,
+      type_fail: $type_fail,
+      test_fail: $test_fail,
+      checks: $checks
+    }'
+}
+
 main() {
   ensure_jq
 
@@ -117,7 +195,6 @@ main() {
   local gh_ok=true
   ensure_gh || gh_ok=false
 
-  # Get tasks that need checking
   local task_ids
   task_ids="$(jq -r '.tasks[] | select(.status == "running" or .status == "pr_open") | .id' "$REGISTRY")"
 
@@ -132,14 +209,18 @@ main() {
   while IFS= read -r task_id; do
     [ -z "$task_id" ] && continue
 
-    local status branch base_branch
+    local status branch repo_path tmux_session
     status="$(jq -r --arg id "$task_id" '.tasks[] | select(.id == $id) | .status' "$REGISTRY")"
     branch="$(jq -r --arg id "$task_id" '.tasks[] | select(.id == $id) | .branch' "$REGISTRY")"
-    base_branch="$(jq -r --arg id "$task_id" '.tasks[] | select(.id == $id) | .base_branch' "$REGISTRY")"
+    repo_path="$(jq -r --arg id "$task_id" '.tasks[] | select(.id == $id) | (.repo_path // "")' "$REGISTRY")"
+    tmux_session="$(jq -r --arg id "$task_id" '.tasks[] | select(.id == $id) | (.tmux_session // "")' "$REGISTRY")"
+
+    if [ -z "$repo_path" ] || [ "$repo_path" = "null" ]; then
+      repo_path="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+    fi
 
     info "Task: $task_id (status: $status, branch: $branch)"
 
-    # If gh is not authenticated, block all tasks
     if [ "$gh_ok" = false ]; then
       update_task "$task_id" "blocked" "gh CLI not authenticated. Run: gh auth login"
       info "  -> blocked (gh not authenticated)"
@@ -147,33 +228,41 @@ main() {
       continue
     fi
 
-    # Check if branch exists remotely
-    local remote_branch_exists=false
-    if git ls-remote --heads origin "$branch" 2>/dev/null | grep -q "$branch"; then
-      remote_branch_exists=true
+    if [ "$CLAWDBOT_CHECK_TMUX" = "1" ] && ! check_tmux_liveness "$tmux_session"; then
+      update_task "$task_id" "failed" "tmux session not alive: $tmux_session"
+      info "  -> failed (tmux session dead)"
+      echo ""
+      continue
     fi
 
-    if [ "$remote_branch_exists" = false ]; then
+    if ! branch_exists_local "$repo_path" "$branch"; then
+      update_task "$task_id" "blocked" "Local branch not found: $branch"
+      info "  -> blocked (local branch missing)"
+      echo ""
+      continue
+    fi
+
+    if ! branch_exists_remote "$repo_path" "$branch"; then
       if [ "$status" = "running" ]; then
         info "  -> still running (no remote branch yet)"
       else
-        info "  -> branch not found remotely"
+        update_task "$task_id" "blocked" "Remote branch not found: $branch"
+        info "  -> blocked (remote branch missing)"
       fi
       echo ""
       continue
     fi
 
-    # Check for open PR
-    local pr_json
-    pr_json="$(gh pr list --head "$branch" --json number,title,url,state,mergeable,mergeStateStatus --limit 1 2>/dev/null || echo "[]")"
-    local pr_count
+    local pr_json pr_count
+    pr_json="$(gh_repo "$repo_path" pr list --head "$branch" --state open --json number,title,url,mergeable,mergeStateStatus --limit 1 2>/dev/null || echo "[]")"
     pr_count="$(echo "$pr_json" | jq 'length')"
 
     if [ "$pr_count" -eq 0 ]; then
       if [ "$status" = "running" ]; then
         info "  -> still running (no PR yet)"
       else
-        info "  -> no open PR found"
+        update_task "$task_id" "blocked" "No open PR found for branch $branch"
+        info "  -> blocked (no open PR)"
       fi
       echo ""
       continue
@@ -189,36 +278,37 @@ main() {
     info "  PR #$pr_number: $pr_title"
     info "  URL: $pr_url"
 
-    # If task was running and PR now exists, transition to pr_open
     if [ "$status" = "running" ]; then
       update_task "$task_id" "pr_open" "" "$pr_number" "$pr_url"
       status="pr_open"
       info "  -> status updated: running -> pr_open"
     fi
 
-    # Check merge conflicts
-    if [ "$mergeable" = "CONFLICTING" ]; then
-      update_task "$task_id" "blocked" "Merge conflicts detected" "$pr_number" "$pr_url"
-      info "  -> blocked (merge conflicts)"
+    if merge_state_blocks "$mergeable" "$merge_state"; then
+      update_task "$task_id" "blocked" "PR is conflicting or behind base branch" "$pr_number" "$pr_url"
+      info "  -> blocked (merge/conflict state: $mergeable/$merge_state)"
       echo ""
       continue
     fi
 
-    # Check CI status via check runs
-    local checks_json
-    checks_json="$(gh pr checks "$pr_number" --json name,state,conclusion 2>/dev/null || echo "[]")"
+    local ci_result
+    ci_result="$(check_ci_status "$repo_path" "$pr_number")"
 
-    local total_checks passing_checks failing_checks pending_checks
-    total_checks="$(echo "$checks_json" | jq 'length')"
-    passing_checks="$(echo "$checks_json" | jq '[.[] | select(.conclusion == "SUCCESS" or .conclusion == "success")] | length')"
-    failing_checks="$(echo "$checks_json" | jq '[.[] | select(.conclusion == "FAILURE" or .conclusion == "failure" or .conclusion == "ERROR" or .conclusion == "error")] | length')"
-    pending_checks="$(echo "$checks_json" | jq '[.[] | select(.state == "PENDING" or .state == "pending" or .state == "QUEUED" or .state == "queued" or .conclusion == "" or .conclusion == null)] | length')"
+    local total_checks failing_checks pending_checks lint_fail type_fail test_fail checks_json
+    total_checks="$(echo "$ci_result" | jq -r '.total_checks')"
+    failing_checks="$(echo "$ci_result" | jq -r '.failing_checks')"
+    pending_checks="$(echo "$ci_result" | jq -r '.pending_checks')"
+    lint_fail="$(echo "$ci_result" | jq -r '.lint_fail')"
+    type_fail="$(echo "$ci_result" | jq -r '.type_fail')"
+    test_fail="$(echo "$ci_result" | jq -r '.test_fail')"
+    checks_json="$(echo "$ci_result" | jq -c '.checks')"
 
-    info "  Checks: $total_checks total, $passing_checks passing, $failing_checks failing, $pending_checks pending"
+    info "  Checks: $total_checks total, $failing_checks failing, $pending_checks pending"
 
-    if [ "$failing_checks" -gt 0 ]; then
+    if [ "$failing_checks" -gt 0 ] || [ "$lint_fail" -gt 0 ] || [ "$type_fail" -gt 0 ] || [ "$test_fail" -gt 0 ]; then
       local failed_names
-      failed_names="$(echo "$checks_json" | jq -r '[.[] | select(.conclusion == "FAILURE" or .conclusion == "failure" or .conclusion == "ERROR" or .conclusion == "error")] | map(.name) | join(", ")')"
+      failed_names="$(echo "$checks_json" | jq -r '[.[] | select((.conclusion // "") | test("^(FAILURE|failure|ERROR|error|CANCELLED|cancelled)$")) | .name] | join(", ")')"
+      [ -z "$failed_names" ] && failed_names="one or more required checks"
       update_task "$task_id" "failed" "CI checks failing: $failed_names" "$pr_number" "$pr_url"
       info "  -> failed (CI: $failed_names)"
       echo ""
@@ -231,20 +321,16 @@ main() {
       continue
     fi
 
-    # All checks passing — verify definition of done
-    # Screenshot check for UI changes
-    if ! check_screenshot_required "$pr_number" "$branch" ""; then
+    if ! check_screenshot_required "$repo_path" "$pr_number"; then
       update_task "$task_id" "blocked" "UI changes detected but no 'Screenshot:' line in PR body" "$pr_number" "$pr_url"
       info "  -> blocked (screenshot required for UI changes)"
       echo ""
       continue
     fi
 
-    # All checks pass!
     update_task "$task_id" "done" "" "$pr_number" "$pr_url"
     notify "PR #$pr_number ready for review: $pr_title ($pr_url)"
     echo ""
-
   done <<< "$task_ids"
 
   info "Supervisor check complete."

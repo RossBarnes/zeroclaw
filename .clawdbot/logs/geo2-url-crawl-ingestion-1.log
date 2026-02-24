@@ -1,0 +1,8 @@
+error: unexpected argument '--prompt-file' found
+
+  tip: a similar argument exists: '--profile'
+
+Usage: codex [OPTIONS] [PROMPT]
+       codex [OPTIONS] <COMMAND> [ARGS]
+
+For more information, try '--help'.

@@ -1,0 +1,2315 @@
+OpenAI Codex v0.104.0-alpha.1 (research preview)
+--------
+workdir: /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2
+model: gpt-5.3-codex
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c8ffa-0376-7a31-bcd4-0f99cb47079f
+--------
+user
+# Task: geo2-url-crawl-ingestion-2
+
+## Problem Statement
+
+Implement the technical brief exactly as specified.
+
+## Acceptance Criteria
+
+- [ ] All requirements in the brief are implemented
+- [ ] Non-goals in the brief are respected
+- [ ] Any assumptions are documented in the PR body
+
+## Definition of Done
+
+See: .clawdbot/policies/definition-of-done.md
+
+- [ ] PR exists targeting origin/main
+- [ ] CI checks pass
+- [ ] No merge conflicts
+- [ ] Screenshot included (if UI changes)
+
+## File Scope
+
+(fill based on the brief before coding)
+
+## Technical Brief
+
+# GEO2 URL Crawl Ingestion
+Implement URL ingestion and crawl capability so GEO2 can fetch and process content from a provided URL.
+
+Requirements:
+- Add API/backend path to accept a URL input
+- Implement safe crawl/fetch flow with domain + protocol validation
+- Respect reasonable timeout, size limits, and deterministic error handling
+- Extract normalized text/content payload for downstream GEO2 processing
+- Add tests for happy path and key failures (invalid URL, timeout, blocked domain, oversized response)
+
+Security constraints:
+- Do not broaden execution permissions
+- Keep network behavior explicit and bounded
+- Fail fast on unsafe/unsupported URL states
+
+Acceptance criteria:
+- URL ingestion endpoint/tool works end-to-end
+- Crawl results are observable in platform workflow/logs
+- Tests pass for key failure modes and normal flow
+
+mcp startup: no servers
+2026-02-24T14:07:32.789932Z  WARN codex_core::state_db: state db record_discrepancy: find_thread_path_by_id_str_in_subdir, falling_back
+2026-02-24T14:07:32.810522Z  WARN codex_core::state_db: state db record_discrepancy: find_thread_path_by_id_str_in_subdir, falling_back
+2026-02-24T14:07:32.862667Z  WARN codex_core::state_db: state db record_discrepancy: find_thread_path_by_id_str_in_subdir, falling_back
+2026-02-24T14:07:32.874486Z  WARN codex_core::state_db: state db record_discrepancy: find_thread_path_by_id_str_in_subdir, falling_back
+2026-02-24T14:07:32.899225Z  WARN codex_core::state_db: state db record_discrepancy: find_thread_path_by_id_str_in_subdir, falling_back
+
+thinking
+**Confirming read-only limitation**
+codex
+I’ll inspect the codebase and the definition-of-done/brief-related files first, then map the exact implementation points and test gaps before making changes. I’ll start by locating existing ingestion/crawl paths and test structure.
+exec
+/bin/zsh -lc "ls -la .clawdbot/policies && sed -n '1,220p' .clawdbot/policies/definition-of-done.md" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2exec
+/bin/zsh -lc 'pwd && ls -la' in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2exec
+/bin/zsh -lc 'rg --files' in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2 exited 1 in 52ms:
+ls: .clawdbot/policies: No such file or directory
+ succeeded in 52ms:
+/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2
+total 48
+drwxr-xr-x@ 14 rossbarnes  wheel   448 Feb 24 14:07 .
+drwxr-xr-x@  5 rossbarnes  wheel   160 Feb 24 14:07 ..
+-rw-r--r--@  1 rossbarnes  wheel    90 Feb 24 14:07 .git
+-rw-r--r--@  1 rossbarnes  wheel    66 Feb 24 14:07 .gitattributes
+drwxr-xr-x@  4 rossbarnes  wheel   128 Feb 24 14:07 .github
+-rw-r--r--@  1 rossbarnes  wheel    51 Feb 24 14:07 .gitignore
+-rw-r--r--@  1 rossbarnes  wheel   552 Feb 24 14:07 CHANGELOG.md
+-rw-r--r--@  1 rossbarnes  wheel  3791 Feb 24 14:07 README.md
+drwxr-xr-x@ 13 rossbarnes  wheel   416 Feb 24 14:07 examples
+drwxr-xr-x@  9 rossbarnes  wheel   288 Feb 24 14:07 ops
+-rw-r--r--@  1 rossbarnes  wheel   811 Feb 24 14:07 pyproject.toml
+drwxr-xr-x@  8 rossbarnes  wheel   256 Feb 24 14:07 schemas
+drwxr-xr-x@  5 rossbarnes  wheel   160 Feb 24 14:07 src
+drwxr-xr-x@ 23 rossbarnes  wheel   736 Feb 24 14:07 tests
+ succeeded in 51ms:
+pyproject.toml
+CHANGELOG.md
+schemas/output.schema.json
+schemas/authority-graph.schema.json
+schemas/bias-payload.schema.json
+schemas/SCHEMA_POLICY.md
+schemas/inclusion-index.schema.json
+schemas/reinforcement-brief.schema.json
+README.md
+examples/sample.txt
+examples/sample.reinforcement-brief.md
+examples/fixtures/llm_answers/fixture_set.json
+examples/sample.authority-graph.json
+examples/config/territories.json
+examples/config/entity-canonicals.json
+examples/config/query-classes.json
+examples/sample.inclusion-index.json
+src/cli/main.py
+src/cli/run_dir.py
+src/cli/validate.py
+
+thinking
+**Checking ingestion URL handling**
+codex
+I found an existing URL ingestion CLI and tests, so I’m drilling into those files now to align implementation with your brief and identify exactly what’s missing. Also, `.clawdbot/policies/definition-of-done.md` is not present in this worktree.
+exec
+/bin/zsh -lc "sed -n '1,300p' tests/test_ingest_url.py" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2exec
+/bin/zsh -lc "sed -n '1,260p' src/cli/ingest_url.py" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2exec
+/bin/zsh -lc 'rg -n "ingest_url|crawl|url" src tests README.md' in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2 succeeded in 51ms:
+from __future__ import annotations
+
+import argparse
+import re
+from pathlib import Path
+from urllib.parse import urlparse
+
+from src.pipeline.core import build_output_document, build_run_manifest, write_json
+from src.pipeline.extract import URLIngestError, fetch_url_text
+
+
+def _slug_from_url(url: str) -> str:
+    parsed = urlparse(url)
+    stem = Path(parsed.path).stem or parsed.netloc or "url"
+    slug = re.sub(r"[^a-zA-Z0-9._-]+", "-", stem).strip("-")
+    return slug or "url"
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Ingest content from a URL and emit structured JSON.")
+ succeeded in 51ms:
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import MagicMock, patch
+
+from src.cli.ingest_url import main
+
+
+class IngestURLCommandTests(unittest.TestCase):
+    def test_ingest_url_command_writes_outputs_with_mocked_fetch(self) -> None:
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "out"
+            response = MagicMock()
+            response.read.return_value = b"<html><body><p>Alice Johnson launched Atlas Widget.</p></body></html>"
+            response.headers.get.return_value = "text/html; charset=utf-8"
+ succeeded in 52ms:
+README.md:54:geo2-ingest-url https://example.com/article --out-dir out
+tests/test_ingest_url.py:11:from src.cli.ingest_url import main
+tests/test_ingest_url.py:15:    def test_ingest_url_command_writes_outputs_with_mocked_fetch(self) -> None:
+tests/test_ingest_url.py:23:                patch("src.pipeline.extract.urllib.request.urlopen") as mock_urlopen,
+tests/test_ingest_url.py:27:                    ["geo2-ingest-url", "https://example.com/article", "--out-dir", str(out_dir)],
+tests/test_ingest_url.py:30:                mock_urlopen.return_value.__enter__.return_value = response
+tests/test_ingest_url.py:42:    def test_ingest_url_requires_http_scheme(self) -> None:
+tests/test_ingest_url.py:43:        cmd = [sys.executable, "-m", "src.cli.ingest_url", "file:///tmp/test.txt"]
+tests/test_payload.py:21:    @patch("src.pipeline.payload.urllib.request.urlopen")
+tests/test_payload.py:22:    def test_build_bias_payload_local_llm_provider(self, mock_urlopen: MagicMock) -> None:
+tests/test_payload.py:43:        mock_urlopen.return_value.__enter__.return_value = response_obj
+tests/test_payload.py:49:    @patch("src.pipeline.payload.urllib.request.urlopen", side_effect=OSError("offline"))
+tests/test_payload.py:50:    def test_build_bias_payload_local_llm_falls_back_when_unavailable(self, _mock_urlopen: MagicMock) -> None:
+tests/test_payload.py:56:    @patch("src.pipeline.payload.urllib.request.urlopen", side_effect=OSError("offline"))
+tests/test_payload.py:57:    def test_build_bias_payload_local_llm_required_raises_when_unavailable(self, _mock_urlopen: MagicMock) -> None:
+tests/test_extract.py:6:from src.pipeline.extract import URLIngestError, fetch_url_text, html_to_text
+tests/test_extract.py:18:    @patch("src.pipeline.extract.urllib.request.urlopen")
+tests/test_extract.py:19:    def test_fetch_url_text_handles_html(self, mock_urlopen: MagicMock) -> None:
+tests/test_extract.py:23:        mock_urlopen.return_value.__enter__.return_value = response
+tests/test_extract.py:25:        text = fetch_url_text("https://example.com")
+
+thinking
+**Planning extract.py review**
+exec
+/bin/zsh -lc "sed -n '1,260p' src/pipeline/extract.py" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2 succeeded in 52ms:
+from __future__ import annotations
+
+import re
+import urllib.error
+import urllib.request
+from html.parser import HTMLParser
+
+
+class URLIngestError(RuntimeError):
+    """Raised when URL content cannot be fetched or parsed."""
+
+
+class _VisibleTextHTMLParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self._chunks: list[str] = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in {"script", "style", "noscript"}:
+
+thinking
+**Reviewing validation scope and CLI entrypoints**
+codex
+I confirmed the current fetch flow is minimal (no domain allow/block policy, no size cap, and coarse error taxonomy). Next I’m checking package entry points and existing platform workflow/logging patterns so we can wire crawl observability in the same style.
+exec
+/bin/zsh -lc "sed -n '1,260p' src/pipeline/core.py" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2exec
+/bin/zsh -lc "sed -n '1,260p' pyproject.toml" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2exec
+/bin/zsh -lc "sed -n '1,240p' README.md" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2 succeeded in 52ms:
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "geo2-ingest"
+version = "0.2.0"
+description = "Geo2 v2 authority operating system scaffold"
+readme = "README.md"
+requires-python = ">=3.10"
+
+[project.scripts]
+geo2-ingest = "src.cli.main:main"
+geo2-ingest-url = "src.cli.ingest_url:main"
+geo2-validate = "src.cli.validate:main"
+geo2-validate-suite = "src.cli.validate_suite:main"
+geo2-run = "src.cli.run:main"
+geo2-run-dir = "src.cli.run_dir:main"
+geo2-ops-check = "src.cli.ops_check:main"
+geo2-graph = "src.cli.graph:main"
+ succeeded in 52ms:
+# Geo2 v2 (AI Authority Operating System)
+
+Geo2 v2 is a deterministic, schema-first pipeline that turns branded content and config into authority graph artifacts, GEO bias payloads, fixture-based inclusion scoring, and reinforcement briefs without a UI or database.
+
+## Toolchain
+
+- Python `3.10+` (CI uses `3.12`)
+- Determinism clock: `SOURCE_DATE_EPOCH` (default `0`)
+
+## Content placement
+
+- Put source content in `/Users/rossbarnes/Documents/GitHub/Geo2/examples/content/recipes/`
+- Keep strategic config in `/Users/rossbarnes/Documents/GitHub/Geo2/examples/config/`
+- Keep monitoring fixtures in `/Users/rossbarnes/Documents/GitHub/Geo2/examples/fixtures/llm_answers/`
+
+## Install
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+ succeeded in 52ms:
+from __future__ import annotations
+
+import importlib.resources
+import json
+import os
+import platform
+import re
+from pathlib import Path
+from typing import Any
+
+from src.pipeline.common import deterministic_timestamp, sha256_text, write_json
+
+SCHEMA_VERSION = "0.1"
+TOOL_NAME = "geo2-ingest"
+TOOL_VERSION = "0.1.0"
+PEOPLE_NOISE_TOKENS = {
+    "all",
+    "breakfasts",
+    "centre",
+    "close",
+
+thinking
+**Assessing run and pipeline integration**
+exec
+/bin/zsh -lc "sed -n '1,300p' tests/test_extract.py" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2exec
+/bin/zsh -lc "sed -n '1,280p' src/pipeline/common.py" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2exec
+/bin/zsh -lc "sed -n '1,260p' src/cli/run.py" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2 succeeded in 52ms:
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import platform
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+
+def deterministic_timestamp() -> str:
+    epoch = int(os.getenv("SOURCE_DATE_EPOCH", "0"))
+    return datetime.fromtimestamp(epoch, tz=UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def sha256_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+ succeeded in 51ms:
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+from typing import Any
+
+from src.pipeline.brief import build_reinforcement_brief, write_reinforcement_brief
+from src.pipeline.core import build_output_document, build_run_manifest, write_json
+from src.pipeline.graph import build_authority_graph, write_authority_graph
+from src.pipeline.monitor import build_inclusion_index, write_inclusion_index
+from src.pipeline.payload import (
+    DEFAULT_LOCAL_ENDPOINT,
+    DEFAULT_LOCAL_MODEL,
+    DEFAULT_PROVIDER,
+    LOCAL_LLM_PROVIDER,
+    LocalModelUnavailableError,
+    build_and_write_payload,
+)
+from src.pipeline.paths import repo_path, resolve_existing_path
+from src.pipeline.schema_validate import validate_file
+ succeeded in 51ms:
+from __future__ import annotations
+
+import unittest
+from unittest.mock import MagicMock, patch
+
+from src.pipeline.extract import URLIngestError, fetch_url_text, html_to_text
+
+
+class ExtractTests(unittest.TestCase):
+    def test_html_to_text_removes_script_and_style(self) -> None:
+        html = """
+        <html><head><style>.x{color:red}</style><script>alert(1)</script></head>
+        <body><h1>Geo2</h1><p>Hello world.</p></body></html>
+        """
+        text = html_to_text(html)
+        self.assertEqual(text, "Geo2 Hello world.")
+
+    @patch("src.pipeline.extract.urllib.request.urlopen")
+    def test_fetch_url_text_handles_html(self, mock_urlopen: MagicMock) -> None:
+        response = MagicMock()
+
+thinking
+**Planning URL validation and error handling**
+codex
+I’ve identified the concrete delta: harden `src/pipeline/extract.py` for URL safety and bounded fetch, then update `src/cli/ingest_url.py`/tests to assert deterministic failure cases and observable crawl metadata. I’m quickly checking schema constraints so we only add fields where safe.
+exec
+/bin/zsh -lc "sed -n '1,260p' tests/test_end_to_end.py" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2exec
+/bin/zsh -lc "sed -n '1,260p' schemas/output.schema.json" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2exec
+/bin/zsh -lc "rg -n \"manifest|ingest.manifest|config\\\"\" tests src | head -n 120" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2 succeeded in 50ms:
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from src.pipeline.schema_validate import validate_file
+
+
+class EndToEndTests(unittest.TestCase):
+    def test_full_pipeline_and_manifests(self) -> None:
+        env = os.environ.copy()
+        env["SOURCE_DATE_EPOCH"] = "0"
+
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "out"
+
+ succeeded in 51ms:
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/output.schema.json",
+  "title": "Geo2 Ingest Output",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "input",
+    "metadata",
+    "entities",
+    "intents",
+    "generatedAt",
+    "tool"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "0.1"
+    },
+    "input": {
+ succeeded in 50ms:
+src/pipeline/core.py:233:def build_run_manifest(input_path: Path, output_path: Path, document: dict[str, Any]) -> dict[str, Any]:
+src/pipeline/core.py:246:        "config": {
+src/pipeline/core.py:253:__all__ = ["build_output_document", "build_run_manifest", "write_json"]
+src/cli/run.py:8:from src.pipeline.core import build_output_document, build_run_manifest, write_json
+src/cli/run.py:35:    parser.add_argument("--config", type=Path, default=Path("examples/config"), help="Config directory")
+src/cli/run.py:116:    ingest_manifest_path = ingest_dir / "ingest.manifest.json"
+src/cli/run.py:120:        ingest_manifest_path,
+src/cli/run.py:121:        build_run_manifest(input_path=input_path, output_path=ingest_json_path, document=ingest_doc),
+src/cli/run.py:128:    graph_path, graph_manifest_path = write_authority_graph(out_dir, run_id, graph, ingest_dir, config)
+src/cli/run.py:131:        payload_path, payload_manifest_path = build_and_write_payload(
+src/cli/run.py:144:    index_path, index_manifest_path = write_inclusion_index(out_dir, run_id, index, fixtures, rubric)
+src/cli/run.py:147:    brief_path, brief_manifest_path, brief_md_path = write_reinforcement_brief(
+src/cli/run.py:164:        "ingestManifestPath": str(ingest_manifest_path),
+src/cli/run.py:166:        "authorityGraphManifestPath": str(graph_manifest_path),
+src/cli/run.py:168:        "biasPayloadManifestPath": str(payload_manifest_path),
+src/cli/run.py:170:        "inclusionIndexManifestPath": str(index_manifest_path),
+src/cli/run.py:172:        "reinforcementBriefManifestPath": str(brief_manifest_path),
+src/cli/ingest_url.py:8:from src.pipeline.core import build_output_document, build_run_manifest, write_json
+src/cli/ingest_url.py:42:    manifest_path = out_dir / f"{stem}.manifest.json"
+src/cli/ingest_url.py:50:    manifest = build_run_manifest(input_path=Path(args.url), output_path=output_path, document=document)
+
+thinking
+**Confirming patch feasibility**
+codex
+Plan for this implementation:
+
+1. Harden URL ingestion in `src/pipeline/extract.py`
+- Add explicit URL validation (`http`/`https` only, hostname required, reject localhost/private/link-local/loopback and obvious internal domains).
+- Add bounded fetch behavior: strict timeout, max-bytes cap, and deterministic error mapping (invalid URL, blocked domain, timeout, oversized, fetch failure, empty content).
+- Keep behavior explicit and fail-fast before any network call for unsafe URLs.
+
+2. Wire crawl observability in `src/cli/ingest_url.py`
+- Preserve end-to-end output generation.
+- Add crawl metadata into ingest manifest `config` so URL source + limits are visible in workflow artifacts/logs.
+
+3. Expand tests
+- `tests/test_extract.py`: add key failure mode tests (invalid URL, timeout mapping, blocked domain, oversized response).
+- `tests/test_ingest_url.py`: assert end-to-end success plus deterministic stderr for failure modes where applicable.
+
+4. Run targeted tests
+- Execute URL ingestion/extract tests and report outcomes.
+- If full suite can’t be run here, I’ll call that out explicitly.
+
+I’m now starting edits, but I may be blocked by workspace write permissions and will report immediately if so.
+
+thinking
+**Highlighting potential patch failure**
+codex
+I hit two blockers: this workspace is read-only, and patches must go through the dedicated `apply_patch` tool. I’ll retry with `apply_patch` now, but write restrictions may still prevent file changes.
+
+thinking
+**Reporting write-blocker and preparing patch**
+codex
+Write access is hard-blocked in this environment (`sandbox_mode=read-only`), so I can’t modify files or create a PR from this worktree. I’ll provide a ready-to-apply patch plan with exact file edits and tests so you can apply it in a writable session immediately.
+
+thinking
+**Preparing final implementation summary**
+codex
+Implementation is blocked by environment permissions: this worktree is read-only, so file edits, test updates, and PR creation cannot be performed.
+
+Blocked actions:
+- Could not patch [src/pipeline/extract.py](/private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2/src/pipeline/extract.py)
+- Could not patch [src/cli/ingest_url.py](/private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2/src/cli/ingest_url.py)
+- Could not patch [tests/test_extract.py](/private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2/tests/test_extract.py)
+- Could not patch [tests/test_ingest_url.py](/private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2/tests/test_ingest_url.py)
+- `.clawdbot/policies/definition-of-done.md` is also missing in this worktree
+
+What needs to be implemented once writable:
+1. URL safety + bounded crawl in `extract.py`
+- Validate protocol (`http`/`https`) and hostname
+- Block localhost/private/internal targets
+- Enforce timeout + max response size
+- Deterministic error codes/messages: invalid URL, blocked domain, timeout, oversized, fetch failed, no extractable text
+
+2. Ingestion observability in `ingest_url.py`
+- Preserve end-to-end URL ingest flow
+- Add crawl metadata/limits into manifest config so results are visible in workflow artifacts/logs
+
+3. Tests
+- Add happy-path and failures: invalid URL, timeout, blocked domain, oversized response
+
+Next step to proceed:
+1. Re-run this task with workspace write access (or switch sandbox to writable), and I will apply the patch, run tests, and provide a complete PR-ready result.
+tokens used
+46,645
+Implementation is blocked by environment permissions: this worktree is read-only, so file edits, test updates, and PR creation cannot be performed.
+
+Blocked actions:
+- Could not patch [src/pipeline/extract.py](/private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2/src/pipeline/extract.py)
+- Could not patch [src/cli/ingest_url.py](/private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2/src/cli/ingest_url.py)
+- Could not patch [tests/test_extract.py](/private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2/tests/test_extract.py)
+- Could not patch [tests/test_ingest_url.py](/private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2/tests/test_ingest_url.py)
+- `.clawdbot/policies/definition-of-done.md` is also missing in this worktree
+
+What needs to be implemented once writable:
+1. URL safety + bounded crawl in `extract.py`
+- Validate protocol (`http`/`https`) and hostname
+- Block localhost/private/internal targets
+- Enforce timeout + max response size
+- Deterministic error codes/messages: invalid URL, blocked domain, timeout, oversized, fetch failed, no extractable text
+
+2. Ingestion observability in `ingest_url.py`
+- Preserve end-to-end URL ingest flow
+- Add crawl metadata/limits into manifest config so results are visible in workflow artifacts/logs
+
+3. Tests
+- Add happy-path and failures: invalid URL, timeout, blocked domain, oversized response
+
+Next step to proceed:
+1. Re-run this task with workspace write access (or switch sandbox to writable), and I will apply the patch, run tests, and provide a complete PR-ready result.
+OpenAI Codex v0.104.0-alpha.1 (research preview)
+--------
+workdir: /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2
+model: gpt-5.3-codex
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c8ffe-f9e7-7e93-bcaf-bcbf1c4c6fed
+--------
+user
+# Task: geo2-url-crawl-ingestion-2
+
+## Problem Statement
+
+Implement the technical brief exactly as specified.
+
+## Acceptance Criteria
+
+- [ ] All requirements in the brief are implemented
+- [ ] Non-goals in the brief are respected
+- [ ] Any assumptions are documented in the PR body
+
+## Definition of Done
+
+See: .clawdbot/policies/definition-of-done.md
+
+- [ ] PR exists targeting origin/main
+- [ ] CI checks pass
+- [ ] No merge conflicts
+- [ ] Screenshot included (if UI changes)
+
+## File Scope
+
+(fill based on the brief before coding)
+
+## Technical Brief
+
+# GEO2 URL Crawl Ingestion
+Implement URL ingestion and crawl capability so GEO2 can fetch and process content from a provided URL.
+
+Requirements:
+- Add API/backend path to accept a URL input
+- Implement safe crawl/fetch flow with domain + protocol validation
+- Respect reasonable timeout, size limits, and deterministic error handling
+- Extract normalized text/content payload for downstream GEO2 processing
+- Add tests for happy path and key failures (invalid URL, timeout, blocked domain, oversized response)
+
+Security constraints:
+- Do not broaden execution permissions
+- Keep network behavior explicit and bounded
+- Fail fast on unsafe/unsupported URL states
+
+Acceptance criteria:
+- URL ingestion endpoint/tool works end-to-end
+- Crawl results are observable in platform workflow/logs
+- Tests pass for key failure modes and normal flow
+
+mcp startup: no servers
+2026-02-24T14:12:58.008909Z  WARN codex_core::state_db: state db record_discrepancy: find_thread_path_by_id_str_in_subdir, falling_back
+2026-02-24T14:12:58.037957Z  WARN codex_core::state_db: state db record_discrepancy: find_thread_path_by_id_str_in_subdir, falling_back
+2026-02-24T14:12:58.055347Z  WARN codex_core::state_db: state db record_discrepancy: find_thread_path_by_id_str_in_subdir, falling_back
+2026-02-24T14:12:58.080069Z  WARN codex_core::state_db: state db record_discrepancy: find_thread_path_by_id_str_in_subdir, falling_back
+2026-02-24T14:12:58.101653Z  WARN codex_core::state_db: state db record_discrepancy: find_thread_path_by_id_str_in_subdir, falling_back
+
+thinking
+**Acknowledging read-only sandbox limitation**
+codex
+I’m going to inspect the repository structure and the technical brief targets first, then map where URL ingestion, crawling, and tests should be added before making edits.
+exec
+/bin/zsh -lc "ls -la .clawdbot/policies && sed -n '1,220p' .clawdbot/policies/definition-of-done.md" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2exec
+/bin/zsh -lc 'pwd && ls -la' in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2exec
+/bin/zsh -lc 'rg --files' in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2 exited 1 in 50ms:
+ls: .clawdbot/policies: No such file or directory
+ succeeded in 51ms:
+/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2
+total 48
+drwxr-xr-x@ 14 rossbarnes  wheel   448 Feb 24 14:07 .
+drwxr-xr-x@  6 rossbarnes  wheel   192 Feb 24 14:09 ..
+-rw-r--r--@  1 rossbarnes  wheel    90 Feb 24 14:07 .git
+-rw-r--r--@  1 rossbarnes  wheel    66 Feb 24 14:07 .gitattributes
+drwxr-xr-x@  4 rossbarnes  wheel   128 Feb 24 14:07 .github
+-rw-r--r--@  1 rossbarnes  wheel    51 Feb 24 14:07 .gitignore
+-rw-r--r--@  1 rossbarnes  wheel   552 Feb 24 14:07 CHANGELOG.md
+-rw-r--r--@  1 rossbarnes  wheel  3791 Feb 24 14:07 README.md
+drwxr-xr-x@ 13 rossbarnes  wheel   416 Feb 24 14:07 examples
+drwxr-xr-x@  9 rossbarnes  wheel   288 Feb 24 14:07 ops
+-rw-r--r--@  1 rossbarnes  wheel   811 Feb 24 14:07 pyproject.toml
+drwxr-xr-x@  8 rossbarnes  wheel   256 Feb 24 14:07 schemas
+drwxr-xr-x@  5 rossbarnes  wheel   160 Feb 24 14:07 src
+drwxr-xr-x@ 23 rossbarnes  wheel   736 Feb 24 14:07 tests
+ succeeded in 51ms:
+src/cli/main.py
+src/cli/run_dir.py
+src/cli/validate.py
+src/cli/__init__.py
+src/cli/brief.py
+src/cli/graph.py
+src/cli/ops_check.py
+src/cli/ingest_url.py
+src/cli/monitor.py
+src/cli/run.py
+src/cli/validate_suite.py
+src/__init__.py
+src/pipeline/extract.py
+src/pipeline/templates/__init__.py
+src/pipeline/templates/reinforcement-brief.template.md
+src/pipeline/rules/territories.rules.json
+src/pipeline/rules/inclusion-rubric.rules.json
+src/pipeline/rules/__init__.py
+src/pipeline/rules/intents.rules.json
+src/pipeline/rules/entities.rules.json
+
+thinking
+**Inspecting existing ingest logic**
+codex
+I found an existing `ingest_url` CLI path and tests, so next I’m reading those files to align changes tightly with current architecture and avoid redundant work.
+exec
+/bin/zsh -lc "sed -n '1,260p' src/cli/main.py" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2exec
+/bin/zsh -lc "sed -n '1,260p' src/cli/ingest_url.py" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2exec
+/bin/zsh -lc "sed -n '1,260p' tests/test_ingest_url.py" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2exec
+/bin/zsh -lc "sed -n '1,260p' tests/test_ingest_extraction.py" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2 succeeded in 52ms:
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import MagicMock, patch
+
+from src.cli.ingest_url import main
+
+
+class IngestURLCommandTests(unittest.TestCase):
+    def test_ingest_url_command_writes_outputs_with_mocked_fetch(self) -> None:
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "out"
+            response = MagicMock()
+            response.read.return_value = b"<html><body><p>Alice Johnson launched Atlas Widget.</p></body></html>"
+            response.headers.get.return_value = "text/html; charset=utf-8"
+ succeeded in 52ms:
+from __future__ import annotations
+
+import argparse
+import re
+from pathlib import Path
+from urllib.parse import urlparse
+
+from src.pipeline.core import build_output_document, build_run_manifest, write_json
+from src.pipeline.extract import URLIngestError, fetch_url_text
+
+
+def _slug_from_url(url: str) -> str:
+    parsed = urlparse(url)
+    stem = Path(parsed.path).stem or parsed.netloc or "url"
+    slug = re.sub(r"[^a-zA-Z0-9._-]+", "-", stem).strip("-")
+    return slug or "url"
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Ingest content from a URL and emit structured JSON.")
+ succeeded in 52ms:
+from __future__ import annotations
+
+import unittest
+from pathlib import Path
+
+from src.pipeline.core import build_output_document
+
+
+class IngestExtractionTests(unittest.TestCase):
+    def test_filters_navigation_style_noise_from_people_entities(self) -> None:
+        text = """Skip to content
+Groceries
+Register
+Login
+Tesco Real Food
+Follow us:Tiktok Facebook Twitter YouTube Pinterest Instagram
+Created by The Tesco Real Food team
+"""
+        doc = build_output_document(Path("tesco_recipe.txt"), text)
+
+ succeeded in 52ms:
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+from src.pipeline.core import build_output_document, build_run_manifest, write_json
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Ingest a text file and emit structured JSON.")
+    parser.add_argument("input_path", type=Path, help="Path to input text file")
+    parser.add_argument("--out-dir", type=Path, default=Path("out"), help="Output directory (default: out)")
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+
+    input_path: Path = args.input_path
+    out_dir: Path = args.out_dir
+
+thinking
+**Inspecting text fetch implementation**
+codex
+I confirmed the CLI already exists; now I’m checking the lower-level fetch/extract implementation to see which security and deterministic error requirements are still missing.
+exec
+/bin/zsh -lc "sed -n '1,260p' tests/test_extract.py" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2exec
+/bin/zsh -lc "sed -n '1,320p' src/pipeline/extract.py" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2 succeeded in 52ms:
+from __future__ import annotations
+
+import re
+import urllib.error
+import urllib.request
+from html.parser import HTMLParser
+
+
+class URLIngestError(RuntimeError):
+    """Raised when URL content cannot be fetched or parsed."""
+
+
+class _VisibleTextHTMLParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self._chunks: list[str] = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in {"script", "style", "noscript"}:
+ succeeded in 52ms:
+from __future__ import annotations
+
+import unittest
+from unittest.mock import MagicMock, patch
+
+from src.pipeline.extract import URLIngestError, fetch_url_text, html_to_text
+
+
+class ExtractTests(unittest.TestCase):
+    def test_html_to_text_removes_script_and_style(self) -> None:
+        html = """
+        <html><head><style>.x{color:red}</style><script>alert(1)</script></head>
+        <body><h1>Geo2</h1><p>Hello world.</p></body></html>
+        """
+        text = html_to_text(html)
+        self.assertEqual(text, "Geo2 Hello world.")
+
+    @patch("src.pipeline.extract.urllib.request.urlopen")
+    def test_fetch_url_text_handles_html(self, mock_urlopen: MagicMock) -> None:
+        response = MagicMock()
+exec
+/bin/zsh -lc "sed -n '1,260p' README.md" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2 succeeded in 52ms:
+# Geo2 v2 (AI Authority Operating System)
+
+Geo2 v2 is a deterministic, schema-first pipeline that turns branded content and config into authority graph artifacts, GEO bias payloads, fixture-based inclusion scoring, and reinforcement briefs without a UI or database.
+
+## Toolchain
+
+- Python `3.10+` (CI uses `3.12`)
+- Determinism clock: `SOURCE_DATE_EPOCH` (default `0`)
+
+## Content placement
+
+- Put source content in `/Users/rossbarnes/Documents/GitHub/Geo2/examples/content/recipes/`
+- Keep strategic config in `/Users/rossbarnes/Documents/GitHub/Geo2/examples/config/`
+- Keep monitoring fixtures in `/Users/rossbarnes/Documents/GitHub/Geo2/examples/fixtures/llm_answers/`
+
+## Install
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+
+thinking
+**Planning URL input integration**
+codex
+I’ve identified gaps in `fetch_url_text` (no domain blocklist, size limits, protocol hardening, or deterministic error categories). I’m now tracing the run/workflow logging path so crawl outcomes become observable in manifests/logs as requested.
+exec
+/bin/zsh -lc "sed -n '1,320p' src/pipeline/common.py" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2exec
+/bin/zsh -lc "sed -n '1,320p' src/cli/run.py" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2exec
+/bin/zsh -lc "sed -n '1,320p' src/pipeline/core.py" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2exec
+/bin/zsh -lc "sed -n '1,300p' tests/test_runner.py" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2 succeeded in 51ms:
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import platform
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+
+def deterministic_timestamp() -> str:
+    epoch = int(os.getenv("SOURCE_DATE_EPOCH", "0"))
+    return datetime.fromtimestamp(epoch, tz=UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def sha256_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+ succeeded in 51ms:
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+from typing import Any
+
+from src.pipeline.brief import build_reinforcement_brief, write_reinforcement_brief
+from src.pipeline.core import build_output_document, build_run_manifest, write_json
+from src.pipeline.graph import build_authority_graph, write_authority_graph
+from src.pipeline.monitor import build_inclusion_index, write_inclusion_index
+from src.pipeline.payload import (
+    DEFAULT_LOCAL_ENDPOINT,
+    DEFAULT_LOCAL_MODEL,
+    DEFAULT_PROVIDER,
+    LOCAL_LLM_PROVIDER,
+    LocalModelUnavailableError,
+    build_and_write_payload,
+)
+from src.pipeline.paths import repo_path, resolve_existing_path
+from src.pipeline.schema_validate import validate_file
+ succeeded in 51ms:
+from __future__ import annotations
+
+import importlib.resources
+import json
+import os
+import platform
+import re
+from pathlib import Path
+from typing import Any
+
+from src.pipeline.common import deterministic_timestamp, sha256_text, write_json
+
+SCHEMA_VERSION = "0.1"
+TOOL_NAME = "geo2-ingest"
+TOOL_VERSION = "0.1.0"
+PEOPLE_NOISE_TOKENS = {
+    "all",
+    "breakfasts",
+    "centre",
+    "close",
+ succeeded in 51ms:
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+
+class RunnerCommandTests(unittest.TestCase):
+    def test_runner_generates_all_expected_artifacts(self) -> None:
+        env = os.environ.copy()
+        env["SOURCE_DATE_EPOCH"] = "0"
+
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "out"
+            cmd = [
+                sys.executable,
+                "-m",
+
+thinking
+**Exploring URL ingestion and CLI support**
+codex
+I’ve mapped the relevant modules; next I’m checking packaging/entrypoints and existing run manifests to decide the minimal compliant backend path for URL ingestion with observable crawl outcomes.
+exec
+/bin/zsh -lc "sed -n '1,260p' pyproject.toml" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2exec
+/bin/zsh -lc "sed -n '1,260p' tests/test_end_to_end.py" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2exec
+/bin/zsh -lc 'rg -n "ingest-url|fetch_url_text|URLIngestError|manifest|crawl|url" src tests README.md' in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2 succeeded in 50ms:
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "geo2-ingest"
+version = "0.2.0"
+description = "Geo2 v2 authority operating system scaffold"
+readme = "README.md"
+requires-python = ">=3.10"
+
+[project.scripts]
+geo2-ingest = "src.cli.main:main"
+geo2-ingest-url = "src.cli.ingest_url:main"
+geo2-validate = "src.cli.validate:main"
+geo2-validate-suite = "src.cli.validate_suite:main"
+geo2-run = "src.cli.run:main"
+geo2-run-dir = "src.cli.run_dir:main"
+geo2-ops-check = "src.cli.ops_check:main"
+geo2-graph = "src.cli.graph:main"
+ succeeded in 50ms:
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from src.pipeline.schema_validate import validate_file
+
+
+class EndToEndTests(unittest.TestCase):
+    def test_full_pipeline_and_manifests(self) -> None:
+        env = os.environ.copy()
+        env["SOURCE_DATE_EPOCH"] = "0"
+
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "out"
+
+ succeeded in 52ms:
+README.md:40:- `out/batch-demo/batch-summary.manifest.json`
+README.md:54:geo2-ingest-url https://example.com/article --out-dir out
+tests/test_end_to_end.py:14:    def test_full_pipeline_and_manifests(self) -> None:
+tests/test_end_to_end.py:83:            self.assertTrue((out_dir / "sample.manifest.json").exists())
+tests/test_end_to_end.py:84:            self.assertTrue((out_dir / "e2e" / "authority-graph.manifest.json").exists())
+tests/test_end_to_end.py:85:            self.assertTrue((out_dir / "e2e" / "bias-payload.manifest.json").exists())
+tests/test_end_to_end.py:86:            self.assertTrue((out_dir / "e2e" / "inclusion-index.manifest.json").exists())
+tests/test_end_to_end.py:87:            self.assertTrue((out_dir / "e2e" / "reinforcement-brief.manifest.json").exists())
+src/cli/main.py:6:from src.pipeline.core import build_output_document, build_run_manifest, write_json
+src/cli/main.py:29:    manifest_path = out_dir / f"{stem}.manifest.json"
+src/cli/main.py:32:    manifest = build_run_manifest(input_path=input_path, output_path=output_path, document=document)
+src/cli/main.py:35:    write_json(manifest_path, manifest)
+src/cli/main.py:38:    print(str(manifest_path))
+src/cli/run_dir.py:8:from src.pipeline.common import build_manifest, deterministic_timestamp, write_json
+src/cli/run_dir.py:114:    summary_manifest_path = batch_root / "batch-summary.manifest.json"
+src/cli/run_dir.py:129:    summary_manifest = build_manifest(
+src/cli/run_dir.py:139:    write_json(summary_manifest_path, summary_manifest)
+src/cli/run_dir.py:142:    print(str(summary_manifest_path))
+tests/test_ingest_url.py:11:from src.cli.ingest_url import main
+tests/test_ingest_url.py:15:    def test_ingest_url_command_writes_outputs_with_mocked_fetch(self) -> None:
+
+thinking
+**Assessing patch application limits**
+codex
+Plan for implementation based on current code:
+
+1. Harden crawl layer in `src/pipeline/extract.py`  
+- Add strict URL validation (`http`/`https`, hostname present, no credentials, block local/private/special-use IPs and localhost-style hosts, optional explicit domain blocklist).  
+- Add bounded network behavior (timeout kept explicit, response size cap, deterministic read loop, content-type guard if needed).  
+- Add deterministic error taxonomy/messages for: invalid URL, blocked domain, timeout/fetch failure, oversized response, no extractable text.
+
+2. Make URL ingestion observable in manifests/logs  
+- Extend `src/cli/ingest_url.py` to use validated crawl metadata and write deterministic crawl config/outcome details into the manifest `config` block (without changing schema contracts elsewhere).  
+- Keep CLI output paths unchanged so existing workflows don’t break.
+
+3. Expand tests for required failure modes and happy path  
+- Update/add tests in `tests/test_extract.py` and `tests/test_ingest_url.py` for invalid URL, timeout, blocked domain, oversized response, and successful fetch/extract.  
+- Preserve existing tests while tightening assertions around deterministic error messages.
+
+4. Run targeted tests  
+- Execute URL ingest/extract tests and report results.
+
+I’ll start editing `extract.py` first, then wire manifest observability in `ingest_url.py`, then add tests.
+
+thinking
+**Attempting patch application despite read-only**
+
+thinking
+**Reporting read-only blocking**
+codex
+I’m blocked from applying code changes: the workspace is mounted `read-only`, and file write operations are rejected by policy. I can still provide an exact patch and test updates for you to apply, but I can’t implement or run them in this session.
+OpenAI Codex v0.104.0-alpha.1 (research preview)
+--------
+workdir: /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2
+model: gpt-5.3-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: none
+reasoning summaries: auto
+session id: 019c9000-2fc7-7a93-868f-eefadda99a07
+--------
+user
+# Task: geo2-url-crawl-ingestion-2
+
+## Problem Statement
+
+Implement the technical brief exactly as specified.
+
+## Acceptance Criteria
+
+- [ ] All requirements in the brief are implemented
+- [ ] Non-goals in the brief are respected
+- [ ] Any assumptions are documented in the PR body
+
+## Definition of Done
+
+See: .clawdbot/policies/definition-of-done.md
+
+- [ ] PR exists targeting origin/main
+- [ ] CI checks pass
+- [ ] No merge conflicts
+- [ ] Screenshot included (if UI changes)
+
+## File Scope
+
+(fill based on the brief before coding)
+
+## Technical Brief
+
+# GEO2 URL Crawl Ingestion
+Implement URL ingestion and crawl capability so GEO2 can fetch and process content from a provided URL.
+
+Requirements:
+- Add API/backend path to accept a URL input
+- Implement safe crawl/fetch flow with domain + protocol validation
+- Respect reasonable timeout, size limits, and deterministic error handling
+- Extract normalized text/content payload for downstream GEO2 processing
+- Add tests for happy path and key failures (invalid URL, timeout, blocked domain, oversized response)
+
+Security constraints:
+- Do not broaden execution permissions
+- Keep network behavior explicit and bounded
+- Fail fast on unsafe/unsupported URL states
+
+Acceptance criteria:
+- URL ingestion endpoint/tool works end-to-end
+- Crawl results are observable in platform workflow/logs
+- Tests pass for key failure modes and normal flow
+
+mcp startup: no servers
+2026-02-24T14:14:17.334458Z  WARN codex_core::state_db: state db record_discrepancy: find_thread_path_by_id_str_in_subdir, falling_back
+2026-02-24T14:14:17.362573Z  WARN codex_core::state_db: state db record_discrepancy: find_thread_path_by_id_str_in_subdir, falling_back
+2026-02-24T14:14:17.396941Z  WARN codex_core::state_db: state db record_discrepancy: find_thread_path_by_id_str_in_subdir, falling_back
+2026-02-24T14:14:17.420588Z  WARN codex_core::state_db: state db record_discrepancy: find_thread_path_by_id_str_in_subdir, falling_back
+2026-02-24T14:14:17.432438Z  WARN codex_core::state_db: state db record_discrepancy: find_thread_path_by_id_str_in_subdir, falling_back
+2026-02-24T14:14:17.446636Z  WARN codex_core::state_db: state db record_discrepancy: find_thread_path_by_id_str_in_subdir, falling_back
+codex
+I’m implementing the GEO2 URL crawl ingestion brief end-to-end. I’ll first scan the repo for the GEO2 ingestion path, existing API patterns, and test setup so I can add the URL endpoint, bounded fetch flow, and failure-mode tests in the right places.
+exec
+/bin/zsh -lc 'ls -la' in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2exec
+/bin/zsh -lc 'rg --files' in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2exec
+/bin/zsh -lc 'rg -n "GEO2|ingest|crawl|url|fetch|workflow|log|timeout|blocked domain|domain" .' in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2 succeeded in 51ms:
+total 48
+drwxr-xr-x@ 14 rossbarnes  wheel   448 Feb 24 14:07 .
+drwxr-xr-x@  6 rossbarnes  wheel   192 Feb 24 14:09 ..
+-rw-r--r--@  1 rossbarnes  wheel    90 Feb 24 14:07 .git
+-rw-r--r--@  1 rossbarnes  wheel    66 Feb 24 14:07 .gitattributes
+drwxr-xr-x@  4 rossbarnes  wheel   128 Feb 24 14:07 .github
+-rw-r--r--@  1 rossbarnes  wheel    51 Feb 24 14:07 .gitignore
+-rw-r--r--@  1 rossbarnes  wheel   552 Feb 24 14:07 CHANGELOG.md
+-rw-r--r--@  1 rossbarnes  wheel  3791 Feb 24 14:07 README.md
+drwxr-xr-x@ 13 rossbarnes  wheel   416 Feb 24 14:07 examples
+drwxr-xr-x@  9 rossbarnes  wheel   288 Feb 24 14:07 ops
+-rw-r--r--@  1 rossbarnes  wheel   811 Feb 24 14:07 pyproject.toml
+drwxr-xr-x@  8 rossbarnes  wheel   256 Feb 24 14:07 schemas
+drwxr-xr-x@  5 rossbarnes  wheel   160 Feb 24 14:07 src
+drwxr-xr-x@ 23 rossbarnes  wheel   736 Feb 24 14:07 tests
+ succeeded in 51ms:
+src/cli/main.py
+src/cli/run_dir.py
+src/cli/validate.py
+src/cli/__init__.py
+src/cli/brief.py
+src/cli/graph.py
+src/cli/ops_check.py
+src/cli/ingest_url.py
+src/cli/monitor.py
+src/cli/run.py
+src/cli/validate_suite.py
+src/__init__.py
+src/pipeline/extract.py
+src/pipeline/templates/__init__.py
+src/pipeline/templates/reinforcement-brief.template.md
+src/pipeline/rules/territories.rules.json
+src/pipeline/rules/inclusion-rubric.rules.json
+src/pipeline/rules/__init__.py
+src/pipeline/rules/intents.rules.json
+src/pipeline/rules/entities.rules.json
+ succeeded in 52ms:
+./ops/RUNBOOK.md:36:2. Check ordering of arrays/objects in generation logic.
+./src/cli/ingest_url.py:6:from urllib.parse import urlparse
+./src/cli/ingest_url.py:9:from src.pipeline.extract import URLIngestError, fetch_url_text
+./src/cli/ingest_url.py:12:def _slug_from_url(url: str) -> str:
+./src/cli/ingest_url.py:13:    parsed = urlparse(url)
+./src/cli/ingest_url.py:14:    stem = Path(parsed.path).stem or parsed.netloc or "url"
+./src/cli/ingest_url.py:16:    return slug or "url"
+./src/cli/ingest_url.py:21:    parser.add_argument("url", type=str, help="HTTP(S) URL to ingest")
+./src/cli/ingest_url.py:36:    if not args.url.startswith(("http://", "https://")):
+./src/cli/ingest_url.py:37:        raise SystemExit(f"URL must start with http:// or https://: {args.url}")
+./src/cli/ingest_url.py:39:    stem = args.name.strip() if isinstance(args.name, str) and args.name.strip() else _slug_from_url(args.url)
+./src/cli/ingest_url.py:45:        text = fetch_url_text(args.url)
+./src/cli/ingest_url.py:50:    manifest = build_run_manifest(input_path=Path(args.url), output_path=output_path, document=document)
+./src/cli/run.py:24:    ("ingest.json", "schemas/output.schema.json"),
+./src/cli/run.py:111:    ingest_dir = run_dir / "ingest"
+./src/cli/run.py:114:    ingest_doc = build_output_document(input_path, text)
+./src/cli/run.py:115:    ingest_json_path = ingest_dir / "ingest.json"
+./src/cli/run.py:116:    ingest_manifest_path = ingest_dir / "ingest.manifest.json"
+./src/cli/run.py:118:    write_json(ingest_json_path, ingest_doc)
+./src/cli/run.py:120:        ingest_manifest_path,
+codex
+I found an existing `geo2-ingest-url` CLI and URL fetch helper, so I’ll extend that flow rather than adding a separate stack. Next I’m reading the current extraction and URL tests to implement strict domain/protocol validation, bounded response handling, deterministic errors, and observability hooks without changing permissions scope.
+exec
+/bin/zsh -lc "sed -n '1,220p' src/pipeline/extract.py" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2exec
+/bin/zsh -lc "sed -n '1,220p' src/cli/ingest_url.py" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2exec
+/bin/zsh -lc "sed -n '1,260p' tests/test_extract.py" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2exec
+/bin/zsh -lc "sed -n '1,260p' tests/test_ingest_url.py" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2 succeeded in 51ms:
+from __future__ import annotations
+
+import re
+import urllib.error
+import urllib.request
+from html.parser import HTMLParser
+
+
+class URLIngestError(RuntimeError):
+    """Raised when URL content cannot be fetched or parsed."""
+
+
+class _VisibleTextHTMLParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self._chunks: list[str] = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in {"script", "style", "noscript"}:
+ succeeded in 51ms:
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import MagicMock, patch
+
+from src.cli.ingest_url import main
+
+
+class IngestURLCommandTests(unittest.TestCase):
+    def test_ingest_url_command_writes_outputs_with_mocked_fetch(self) -> None:
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "out"
+            response = MagicMock()
+            response.read.return_value = b"<html><body><p>Alice Johnson launched Atlas Widget.</p></body></html>"
+            response.headers.get.return_value = "text/html; charset=utf-8"
+ succeeded in 51ms:
+from __future__ import annotations
+
+import argparse
+import re
+from pathlib import Path
+from urllib.parse import urlparse
+
+from src.pipeline.core import build_output_document, build_run_manifest, write_json
+from src.pipeline.extract import URLIngestError, fetch_url_text
+
+
+def _slug_from_url(url: str) -> str:
+    parsed = urlparse(url)
+    stem = Path(parsed.path).stem or parsed.netloc or "url"
+    slug = re.sub(r"[^a-zA-Z0-9._-]+", "-", stem).strip("-")
+    return slug or "url"
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Ingest content from a URL and emit structured JSON.")
+ succeeded in 51ms:
+from __future__ import annotations
+
+import unittest
+from unittest.mock import MagicMock, patch
+
+from src.pipeline.extract import URLIngestError, fetch_url_text, html_to_text
+
+
+class ExtractTests(unittest.TestCase):
+    def test_html_to_text_removes_script_and_style(self) -> None:
+        html = """
+        <html><head><style>.x{color:red}</style><script>alert(1)</script></head>
+        <body><h1>Geo2</h1><p>Hello world.</p></body></html>
+        """
+        text = html_to_text(html)
+        self.assertEqual(text, "Geo2 Hello world.")
+
+    @patch("src.pipeline.extract.urllib.request.urlopen")
+    def test_fetch_url_text_handles_html(self, mock_urlopen: MagicMock) -> None:
+        response = MagicMock()
+
+thinking
+**Assessing backend API feasibility**
+codex
+I confirmed the current URL flow is CLI-only with minimal validation, so I’m now checking run/workflow artifacts to wire observable crawl metadata and keep the implementation aligned with existing pipeline conventions.
+exec
+/bin/zsh -lc "sed -n '1,280p' src/cli/run.py" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2exec
+/bin/zsh -lc "sed -n '1,260p' README.md" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2exec
+/bin/zsh -lc "sed -n '1,260p' src/pipeline/core.py" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2 succeeded in 52ms:
+# Geo2 v2 (AI Authority Operating System)
+
+Geo2 v2 is a deterministic, schema-first pipeline that turns branded content and config into authority graph artifacts, GEO bias payloads, fixture-based inclusion scoring, and reinforcement briefs without a UI or database.
+
+## Toolchain
+
+- Python `3.10+` (CI uses `3.12`)
+- Determinism clock: `SOURCE_DATE_EPOCH` (default `0`)
+
+## Content placement
+
+- Put source content in `/Users/rossbarnes/Documents/GitHub/Geo2/examples/content/recipes/`
+- Keep strategic config in `/Users/rossbarnes/Documents/GitHub/Geo2/examples/config/`
+- Keep monitoring fixtures in `/Users/rossbarnes/Documents/GitHub/Geo2/examples/fixtures/llm_answers/`
+
+## Install
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+ succeeded in 52ms:
+from __future__ import annotations
+
+import importlib.resources
+import json
+import os
+import platform
+import re
+from pathlib import Path
+from typing import Any
+
+from src.pipeline.common import deterministic_timestamp, sha256_text, write_json
+
+SCHEMA_VERSION = "0.1"
+TOOL_NAME = "geo2-ingest"
+TOOL_VERSION = "0.1.0"
+PEOPLE_NOISE_TOKENS = {
+    "all",
+    "breakfasts",
+    "centre",
+    "close",
+ succeeded in 52ms:
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+from typing import Any
+
+from src.pipeline.brief import build_reinforcement_brief, write_reinforcement_brief
+from src.pipeline.core import build_output_document, build_run_manifest, write_json
+from src.pipeline.graph import build_authority_graph, write_authority_graph
+from src.pipeline.monitor import build_inclusion_index, write_inclusion_index
+from src.pipeline.payload import (
+    DEFAULT_LOCAL_ENDPOINT,
+    DEFAULT_LOCAL_MODEL,
+    DEFAULT_PROVIDER,
+    LOCAL_LLM_PROVIDER,
+    LocalModelUnavailableError,
+    build_and_write_payload,
+)
+from src.pipeline.paths import repo_path, resolve_existing_path
+from src.pipeline.schema_validate import validate_file
+exec
+/bin/zsh -lc "sed -n '1,260p' .clawdbot/policies/definition-of-done.md" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2 exited 1 in 52ms:
+sed: .clawdbot/policies/definition-of-done.md: No such file or directory
+
+thinking
+**Reviewing CLI setup and entry points**
+exec
+/bin/zsh -lc "sed -n '1,260p' src/cli/main.py" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2exec
+/bin/zsh -lc "sed -n '1,260p' pyproject.toml" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2exec
+/bin/zsh -lc "sed -n '1,260p' src/cli/__init__.py" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2exec
+/bin/zsh -lc 'ls -la .clawdbot || true' in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2 succeeded in 52ms:
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+from src.pipeline.core import build_output_document, build_run_manifest, write_json
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Ingest a text file and emit structured JSON.")
+    parser.add_argument("input_path", type=Path, help="Path to input text file")
+    parser.add_argument("--out-dir", type=Path, default=Path("out"), help="Output directory (default: out)")
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+
+    input_path: Path = args.input_path
+    out_dir: Path = args.out_dir
+ succeeded in 52ms:
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "geo2-ingest"
+version = "0.2.0"
+description = "Geo2 v2 authority operating system scaffold"
+readme = "README.md"
+requires-python = ">=3.10"
+
+[project.scripts]
+geo2-ingest = "src.cli.main:main"
+geo2-ingest-url = "src.cli.ingest_url:main"
+geo2-validate = "src.cli.validate:main"
+geo2-validate-suite = "src.cli.validate_suite:main"
+geo2-run = "src.cli.run:main"
+geo2-run-dir = "src.cli.run_dir:main"
+geo2-ops-check = "src.cli.ops_check:main"
+geo2-graph = "src.cli.graph:main"
+ succeeded in 52ms:
+"""CLI entrypoints."""
+ succeeded in 50ms:
+ls: .clawdbot: No such file or directory
+
+thinking
+**Planning URL ingestion integration**
+exec
+/bin/zsh -lc "sed -n '1,280p' tests/test_runner.py" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2exec
+/bin/zsh -lc "sed -n '1,320p' tests/test_end_to_end.py" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2 succeeded in 51ms:
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+
+class RunnerCommandTests(unittest.TestCase):
+    def test_runner_generates_all_expected_artifacts(self) -> None:
+        env = os.environ.copy()
+        env["SOURCE_DATE_EPOCH"] = "0"
+
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "out"
+            cmd = [
+                sys.executable,
+                "-m",
+ succeeded in 50ms:
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from src.pipeline.schema_validate import validate_file
+
+
+class EndToEndTests(unittest.TestCase):
+    def test_full_pipeline_and_manifests(self) -> None:
+        env = os.environ.copy()
+        env["SOURCE_DATE_EPOCH"] = "0"
+
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "out"
+
+exec
+/bin/zsh -lc "sed -n '1,260p' tests/test_cli_non_root_cwd.py" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2 succeeded in 51ms:
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+
+class CliNonRootCwdTests(unittest.TestCase):
+    def test_geo2_run_works_from_non_repo_cwd(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        input_path = repo_root / "examples/content/recipes/sample.txt"
+
+        env = os.environ.copy()
+        env["SOURCE_DATE_EPOCH"] = "0"
+        env["PYTHONPATH"] = str(repo_root)
+
+        with TemporaryDirectory() as tmp:
+
+thinking
+**Reviewing test compatibility and path resolution**
+exec
+/bin/zsh -lc "sed -n '1,260p' src/pipeline/paths.py" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2 succeeded in 50ms:
+from __future__ import annotations
+
+from pathlib import Path
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def repo_path(*parts: str) -> Path:
+    return PROJECT_ROOT.joinpath(*parts)
+
+
+def resolve_existing_path(path: Path) -> Path:
+    if path.is_absolute() or path.exists():
+        return path
+
+    candidate = PROJECT_ROOT / path
+    if candidate.exists():
+        return candidate
+
+
+thinking
+**Planning crawl result dataclass**
+exec
+/bin/zsh -lc 'cat schemas/output.schema.json' in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2 succeeded in 52ms:
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/output.schema.json",
+  "title": "Geo2 Ingest Output",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "input",
+    "metadata",
+    "entities",
+    "intents",
+    "generatedAt",
+    "tool"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "0.1"
+    },
+    "input": {
+
+thinking
+**Planning bounded URL ingestion**
+codex
+Plan for implementation:
+
+1. Harden URL crawl backend in `src/pipeline/extract.py`:
+- Add strict URL validation (`http/https`, hostname required, no userinfo, blocked/unsafe hosts).
+- Add bounded fetch controls (`timeout`, `max-bytes`, content-length precheck).
+- Return deterministic error codes/messages for invalid URL, blocked domain, timeout, fetch failure, unsupported content type, oversized response, and empty extract.
+- Keep text normalization deterministic for downstream GEO2 ingestion.
+
+2. Add a backend ingestion path in `src/pipeline/url_ingest.py`:
+- Create a reusable function that accepts URL input and writes ingest JSON + manifest.
+- Attach crawl metadata (url, content-type, bytes, limits) to manifest for workflow observability.
+
+3. Update CLI URL tool `src/cli/ingest_url.py`:
+- Route through the new backend function.
+- Expose explicit bounded network flags (`--timeout-seconds`, `--max-bytes`, optional blocked domains).
+- Print crawl summary so results are visible in command logs.
+
+4. Expand tests:
+- `tests/test_extract.py`: happy path plus key failures (invalid URL, timeout, blocked domain, oversized response).
+- `tests/test_ingest_url.py`: ensure CLI writes outputs and includes crawl metadata.
+
+5. Run focused tests and adjust if anything regresses.
+
+thinking
+**Editing extraction module**
+exec
+/bin/zsh -lc "cat > src/pipeline/extract.py <<'PY'
+from __future__ import annotations
+
+import ipaddress
+import re
+import urllib.error
+import urllib.request
+from dataclasses import dataclass
+from html.parser import HTMLParser
+from urllib.parse import urlparse
+
+DEFAULT_URL_TIMEOUT_SECONDS = 20
+DEFAULT_MAX_RESPONSE_BYTES = 2_000_000
+DEFAULT_BLOCKED_DOMAINS = (
+    \"localhost\",
+    \"localdomain\",
+    \"metadata.google.internal\",
+    \"169.254.169.254\",
+)
+BLOCKED_DOMAIN_SUFFIXES = (\".local\", \".internal\")
+_ALLOWED_CONTENT_TYPE_MARKERS = (\"text/\", \"json\", \"xml\", \"javascript\")
+
+
+class URLIngestError(RuntimeError):
+    \"\"\"Raised when URL content cannot be fetched or parsed.\"\"\"
+
+
+@dataclass(frozen=True)
+class URLCrawlResult:
+    source_url: str
+    final_url: str
+    content_type: str
+    bytes_fetched: int
+    text: str
+
+
+class _VisibleTextHTMLParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self._chunks: list[str] = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in {\"script\", \"style\", \"noscript\"}:
+            self._skip_depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in {\"script\", \"style\", \"noscript\"} and self._skip_depth > 0:
+            self._skip_depth -= 1
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth == 0:
+            self._chunks.append(data)
+
+    def text(self) -> str:
+        raw = \" \".join(self._chunks)
+        return _normalize_text(raw)
+
+
+def _normalize_text(text: str) -> str:
+    return re.sub(r\"\\s+\", \" \", text).strip()
+
+
+def _error(code: str, detail: str) -> URLIngestError:
+    return URLIngestError(f\"{code}: {detail}\")
+
+
+def _is_blocked_domain(hostname: str, blocked_domains: tuple[str, ...]) -> bool:
+    lowered_host = hostname.lower()
+    for blocked in blocked_domains:
+        candidate = blocked.strip().lower()
+        if not candidate:
+            continue
+        if lowered_host == candidate or lowered_host.endswith(f\".{candidate}\"):
+            return True
+    return lowered_host.endswith(BLOCKED_DOMAIN_SUFFIXES)
+
+
+def _is_unsafe_ip(hostname: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(hostname)
+    except ValueError:
+        return False
+
+    return (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_multicast
+        or ip.is_reserved
+        or ip.is_unspecified
+    )
+
+
+def _validate_url(url: str, blocked_domains: tuple[str, ...]) -> None:
+    parsed = urlparse(url)
+
+    if parsed.scheme not in {\"http\", \"https\"}:
+        raise _error(\"INVALID_URL\", f\"Unsupported protocol for URL: {url}\")
+
+    if not parsed.hostname:
+        raise _error(\"INVALID_URL\", f\"URL must include a hostname: {url}\")
+
+    if parsed.username or parsed.password:
+        raise _error(\"UNSAFE_URL\", f\"URLs with user info are not supported: {url}\")
+
+    hostname = parsed.hostname.strip().lower()
+    if _is_blocked_domain(hostname, blocked_domains) or _is_unsafe_ip(hostname):
+        raise _error(\"BLOCKED_DOMAIN\", f\"Blocked or unsafe domain: {hostname}\")
+
+
+def html_to_text(html: str) -> str:
+    parser = _VisibleTextHTMLParser()
+    parser.feed(html)
+    return parser.text()
+
+
+def crawl_url(
+    url: str,
+    *,
+    timeout_seconds: int = DEFAULT_URL_TIMEOUT_SECONDS,
+    max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
+    blocked_domains: tuple[str, ...] = DEFAULT_BLOCKED_DOMAINS,
+) -> URLCrawlResult:
+    _validate_url(url, blocked_domains)
+
+    request = urllib.request.Request(
+        url=url,
+        headers={\"User-Agent\": \"geo2-ingest-url/0.2\"},
+        method=\"GET\",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:  # noqa: S310 - explicit user URL
+            content_type = response.headers.get(\"Content-Type\", \"\").lower()
+            content_length_header = response.headers.get(\"Content-Length\", \"\").strip()
+
+            if content_length_header.isdigit() and int(content_length_header) > max_response_bytes:
+                raise _error(\"OVERSIZED_RESPONSE\", f\"Response exceeded {max_response_bytes} bytes\")
+
+            payload = response.read(max_response_bytes + 1)
+            final_url = response.geturl()
+    except URLIngestError:
+        raise
+    except TimeoutError as err:
+        raise _error(\"TIMEOUT\", f\"Timed out after {timeout_seconds}s while fetching URL: {url}\") from err
+    except urllib.error.URLError as err:
+        if isinstance(getattr(err, \"reason\", None), TimeoutError):
+            raise _error(\"TIMEOUT\", f\"Timed out after {timeout_seconds}s while fetching URL: {url}\") from err
+        raise _error(\"FETCH_FAILED\", f\"Unable to fetch URL: {url}\") from err
+    except OSError as err:
+        raise _error(\"FETCH_FAILED\", f\"Unable to fetch URL: {url}\") from err
+
+    if len(payload) > max_response_bytes:
+        raise _error(\"OVERSIZED_RESPONSE\", f\"Response exceeded {max_response_bytes} bytes\")
+
+    if content_type and not any(marker in content_type for marker in _ALLOWED_CONTENT_TYPE_MARKERS):
+        raise _error(\"UNSUPPORTED_CONTENT_TYPE\", f\"Unsupported content type: {content_type}\")
+
+    decoded = payload.decode(\"utf-8\", errors=\"replace\")
+    if \"text/html\" in content_type or \"<html\" in decoded.lower():
+        text = html_to_text(decoded)
+    else:
+        text = _normalize_text(decoded)
+
+    if not text:
+        raise _error(\"EMPTY_CONTENT\", f\"No extractable text content at URL: {url}\")
+
+    return URLCrawlResult(
+        source_url=url,
+        final_url=final_url,
+        content_type=content_type,
+        bytes_fetched=len(payload),
+        text=text,
+    )
+
+
+def fetch_url_text(
+    url: str,
+    *,
+    timeout_seconds: int = DEFAULT_URL_TIMEOUT_SECONDS,
+    max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
+    blocked_domains: tuple[str, ...] = DEFAULT_BLOCKED_DOMAINS,
+) -> str:
+    return crawl_url(
+        url,
+        timeout_seconds=timeout_seconds,
+        max_response_bytes=max_response_bytes,
+        blocked_domains=blocked_domains,
+    ).text
+PY" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2 succeeded in 51ms:
+
+
+thinking
+**Adding backend ingest module**
+codex
+I’m now wiring a reusable backend ingestion function so URL handling isn’t just CLI glue. After that I’ll update the CLI to call it and surface crawl metadata in manifests/logs.
+exec
+/bin/zsh -lc "cat > src/pipeline/url_ingest.py <<'PY'
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from pathlib import Path
+from urllib.parse import urlparse
+
+from src.pipeline.core import build_output_document, build_run_manifest, write_json
+from src.pipeline.extract import (
+    DEFAULT_BLOCKED_DOMAINS,
+    DEFAULT_MAX_RESPONSE_BYTES,
+    DEFAULT_URL_TIMEOUT_SECONDS,
+    URLCrawlResult,
+    crawl_url,
+)
+
+
+@dataclass(frozen=True)
+class URLIngestionResult:
+    output_path: Path
+    manifest_path: Path
+    crawl: URLCrawlResult
+
+
+def slug_from_url(url: str) -> str:
+    parsed = urlparse(url)
+    stem = Path(parsed.path).stem or parsed.netloc or \"url\"
+    slug = re.sub(r\"["'^a-zA-Z0-9._-]+", "-", stem).strip("-")
+    return slug or "url"
+
+
+def ingest_url_to_artifacts(
+    *,
+    url: str,
+    out_dir: Path,
+    name: str | None = None,
+    timeout_seconds: int = DEFAULT_URL_TIMEOUT_SECONDS,
+    max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
+    blocked_domains: tuple[str, ...] = DEFAULT_BLOCKED_DOMAINS,
+) -> URLIngestionResult:
+    stem = name.strip() if isinstance(name, str) and name.strip() else slug_from_url(url)
+    pseudo_input_path = Path(f"{stem}.txt")
+    output_path = out_dir / f"{stem}.json"
+    manifest_path = out_dir / f"{stem}.manifest.json"
+
+    crawl = crawl_url(
+        url,
+        timeout_seconds=timeout_seconds,
+        max_response_bytes=max_response_bytes,
+        blocked_domains=blocked_domains,
+    )
+
+    document = build_output_document(input_path=pseudo_input_path, text=crawl.text)
+    manifest = build_run_manifest(input_path=Path(url), output_path=output_path, document=document)
+    manifest["crawl"] = {
+        "sourceUrl": crawl.source_url,
+        "finalUrl": crawl.final_url,
+        "contentType": crawl.content_type,
+        "bytesFetched": crawl.bytes_fetched,
+        "timeoutSeconds": timeout_seconds,
+        "maxResponseBytes": max_response_bytes,
+        "blockedDomains": sorted(set(blocked_domains)),
+    }
+
+    write_json(output_path, document)
+    write_json(manifest_path, manifest)
+
+    return URLIngestionResult(output_path=output_path, manifest_path=manifest_path, crawl=crawl)
+PY' in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2 succeeded in 51ms:
+
+
+thinking
+**Updating CLI file**
+exec
+/bin/zsh -lc "cat > src/cli/ingest_url.py <<'PY'
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+from src.pipeline.extract import (
+    DEFAULT_BLOCKED_DOMAINS,
+    DEFAULT_MAX_RESPONSE_BYTES,
+    DEFAULT_URL_TIMEOUT_SECONDS,
+    URLIngestError,
+)
+from src.pipeline.url_ingest import ingest_url_to_artifacts
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=\"Ingest content from a URL and emit structured JSON.\")
+    parser.add_argument(\"url\", type=str, help=\"HTTP(S) URL to ingest\")
+    parser.add_argument(\"--out-dir\", type=Path, default=Path(\"out\"), help=\"Output directory (default: out)\")
+    parser.add_argument(
+        \"--name\",
+        type=str,
+        default=None,
+        help=\"Optional output base name override (without extension)\",
+    )
+    parser.add_argument(
+        \"--timeout-seconds\",
+        type=int,
+        default=DEFAULT_URL_TIMEOUT_SECONDS,
+        help=f\"Request timeout in seconds (default: {DEFAULT_URL_TIMEOUT_SECONDS})\",
+    )
+    parser.add_argument(
+        \"--max-bytes\",
+        type=int,
+        default=DEFAULT_MAX_RESPONSE_BYTES,
+        help=f\"Maximum response body size in bytes (default: {DEFAULT_MAX_RESPONSE_BYTES})\",
+    )
+    parser.add_argument(
+        \"--blocked-domain\",
+        dest=\"blocked_domains\",
+        action=\"append\",
+        default=None,
+        help=\"Domain to block (can be repeated, defaults include localhost/private metadata hosts)\",
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    blocked_domains = tuple(args.blocked_domains) if args.blocked_domains else DEFAULT_BLOCKED_DOMAINS
+
+    if args.timeout_seconds <= 0:
+        raise SystemExit(\"ERROR: --timeout-seconds must be greater than 0\")
+    if args.max_bytes <= 0:
+        raise SystemExit(\"ERROR: --max-bytes must be greater than 0\")
+
+    try:
+        result = ingest_url_to_artifacts(
+            url=args.url,
+            out_dir=args.out_dir,
+            name=args.name,
+            timeout_seconds=args.timeout_seconds,
+            max_response_bytes=args.max_bytes,
+            blocked_domains=blocked_domains,
+        )
+    except URLIngestError as err:
+        raise SystemExit(f\"ERROR: {err}\") from err
+
+    print(str(result.output_path))
+    print(str(result.manifest_path))
+    print(
+        f\"crawl url={result.crawl.final_url} bytes={result.crawl.bytes_fetched} \"
+        f\"contentType={result.crawl.content_type or 'unknown'}\"
+    )
+
+
+if __name__ == \"__main__\":
+    main()
+PY" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2 succeeded in 51ms:
+
+
+thinking
+**Designing robust URL fetch tests**
+exec
+/bin/zsh -lc "cat > tests/test_extract.py <<'PY'
+from __future__ import annotations
+
+import unittest
+from unittest.mock import MagicMock, patch
+
+from src.pipeline.extract import (
+    DEFAULT_MAX_RESPONSE_BYTES,
+    URLIngestError,
+    fetch_url_text,
+    html_to_text,
+)
+
+
+class ExtractTests(unittest.TestCase):
+    def test_html_to_text_removes_script_and_style(self) -> None:
+        html = \"\"\"
+        <html><head><style>.x{color:red}</style><script>alert(1)</script></head>
+        <body><h1>Geo2</h1><p>Hello world.</p></body></html>
+        \"\"\"
+        text = html_to_text(html)
+        self.assertEqual(text, \"Geo2 Hello world.\")
+
+    @patch(\"src.pipeline.extract.urllib.request.urlopen\")
+    def test_fetch_url_text_handles_html(self, mock_urlopen: MagicMock) -> None:
+        response = MagicMock()
+        response.read.return_value = b\"<html><body><h1>Title</h1><p>Body text</p></body></html>\"
+        response.geturl.return_value = \"https://example.com\"
+        response.headers.get.side_effect = lambda key, default=\"\": {
+            \"Content-Type\": \"text/html; charset=utf-8\",
+            \"Content-Length\": \"60\",
+        }.get(key, default)
+        mock_urlopen.return_value.__enter__.return_value = response
+
+        text = fetch_url_text(\"https://example.com\")
+        self.assertEqual(text, \"Title Body text\")
+
+    def test_fetch_url_text_rejects_invalid_protocol(self) -> None:
+        with self.assertRaises(URLIngestError) as ctx:
+            fetch_url_text(\"ftp://example.com/file.txt\")
+        self.assertIn(\"INVALID_URL\", str(ctx.exception))
+
+    def test_fetch_url_text_rejects_blocked_domain(self) -> None:
+        with self.assertRaises(URLIngestError) as ctx:
+            fetch_url_text(\"http://localhost/internal\")
+        self.assertIn(\"BLOCKED_DOMAIN\", str(ctx.exception))
+
+    @patch(\"src.pipeline.extract.urllib.request.urlopen\", side_effect=TimeoutError(\"timed out\"))
+    def test_fetch_url_text_raises_timeout_error(self, _mock_urlopen: MagicMock) -> None:
+        with self.assertRaises(URLIngestError) as ctx:
+            fetch_url_text(\"https://example.com\")
+        self.assertIn(\"TIMEOUT\", str(ctx.exception))
+
+    @patch(\"src.pipeline.extract.urllib.request.urlopen\")
+    def test_fetch_url_text_rejects_oversized_response(self, mock_urlopen: MagicMock) -> None:
+        response = MagicMock()
+        response.geturl.return_value = \"https://example.com\"
+        response.headers.get.side_effect = lambda key, default=\"\": {
+            \"Content-Type\": \"text/plain; charset=utf-8\",
+            \"Content-Length\": str(DEFAULT_MAX_RESPONSE_BYTES + 1),
+        }.get(key, default)
+        mock_urlopen.return_value.__enter__.return_value = response
+
+        with self.assertRaises(URLIngestError) as ctx:
+            fetch_url_text(\"https://example.com\")
+        self.assertIn(\"OVERSIZED_RESPONSE\", str(ctx.exception))
+
+
+if __name__ == \"__main__\":
+    unittest.main()
+PY" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2 succeeded in 55ms:
+
+
+thinking
+**Updating ingest URL test**
+codex
+I’ve finished the backend and crawler hardening edits and I’m updating tests to match deterministic error codes plus crawl observability in manifests. Next step is running the URL-specific test suite.
+exec
+/bin/zsh -lc "cat > tests/test_ingest_url.py <<'PY'
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import MagicMock, patch
+
+from src.cli.ingest_url import main
+
+
+class IngestURLCommandTests(unittest.TestCase):
+    def test_ingest_url_command_writes_outputs_with_mocked_fetch(self) -> None:
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / \"out\"
+            response = MagicMock()
+            response.read.return_value = b\"<html><body><p>Alice Johnson launched Atlas Widget.</p></body></html>\"
+            response.geturl.return_value = \"https://example.com/article\"
+            response.headers.get.side_effect = lambda key, default=\"\": {
+                \"Content-Type\": \"text/html; charset=utf-8\",
+                \"Content-Length\": \"100\",
+            }.get(key, default)
+
+            with (
+                patch(\"src.pipeline.extract.urllib.request.urlopen\") as mock_urlopen,
+                patch.object(
+                    sys,
+                    \"argv\",
+                    [\"geo2-ingest-url\", \"https://example.com/article\", \"--out-dir\", str(out_dir)],
+                ),
+            ):
+                mock_urlopen.return_value.__enter__.return_value = response
+                main()
+
+            output = out_dir / \"article.json\"
+            manifest = out_dir / \"article.manifest.json\"
+            self.assertTrue(output.exists())
+            self.assertTrue(manifest.exists())
+
+            payload = json.loads(output.read_text(encoding=\"utf-8\"))
+            self.assertEqual(payload[\"metadata\"][\"detectedLanguage\"], \"en\")
+            self.assertIn(\"Alice Johnson\", payload[\"entities\"][\"people\"])
+
+            manifest_payload = json.loads(manifest.read_text(encoding=\"utf-8\"))
+            self.assertEqual(manifest_payload[\"crawl\"][\"sourceUrl\"], \"https://example.com/article\")
+            self.assertEqual(manifest_payload[\"crawl\"][\"bytesFetched\"], 66)
+
+    def test_ingest_url_requires_supported_http_protocol(self) -> None:
+        cmd = [sys.executable, \"-m\", \"src.cli.ingest_url\", \"file:///tmp/test.txt\"]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(\"INVALID_URL\", result.stderr)
+
+
+if __name__ == \"__main__\":
+    unittest.main()
+PY" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2 succeeded in 51ms:
+
+
+thinking
+**Planning targeted test runs**
+codex
+I’ve aligned tests with the new deterministic crawl behavior and failure codes. I’m running the URL extraction and URL CLI tests now, then I’ll run a broader suite check if those pass.
+exec
+/bin/zsh -lc 'python3 -m unittest tests.test_extract tests.test_ingest_url' in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2 exited 1 in 1.15s:
+......F.
+======================================================================
+FAIL: test_ingest_url_command_writes_outputs_with_mocked_fetch (tests.test_ingest_url.IngestURLCommandTests.test_ingest_url_command_writes_outputs_with_mocked_fetch)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2/tests/test_ingest_url.py", line 48, in test_ingest_url_command_writes_outputs_with_mocked_fetch
+    self.assertEqual(manifest_payload["crawl"]["bytesFetched"], 66)
+AssertionError: 69 != 66
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.078s
+
+FAILED (failures=1)
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmp3b9_u0pq/out/article.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmp3b9_u0pq/out/article.manifest.json
+crawl url=https://example.com/article bytes=69 contentType=text/html; charset=utf-8
+
+thinking
+**Fixing expected byte count in test**
+exec
+/bin/zsh -lc "perl -0pi -e 's/\\[\"crawl\"\\]\\[\"bytesFetched\"\\], 66/\\[\"crawl\"\\]\\[\"bytesFetched\"\\], 69/' tests/test_ingest_url.py" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2 succeeded in 52ms:
+
+
+thinking
+**Rerunning tests for verification**
+exec
+/bin/zsh -lc 'python3 -m unittest tests.test_extract tests.test_ingest_url' in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2 succeeded in 245ms:
+........
+----------------------------------------------------------------------
+Ran 8 tests in 0.099s
+
+OK
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmprcsovio_/out/article.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmprcsovio_/out/article.manifest.json
+crawl url=https://example.com/article bytes=69 contentType=text/html; charset=utf-8
+
+thinking
+**Running broader tests for confidence**
+codex
+The URL-specific tests are passing. I’m running the full unit test suite once to catch regressions from the refactor before I summarize.
+exec
+/bin/zsh -lc "python3 -m unittest discover -s tests -p 'test_*.py'" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2 succeeded in 651ms:
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmplvtyuxlq/out/nonroot/ingest/ingest.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmplvtyuxlq/out/nonroot/ingest/ingest.manifest.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmplvtyuxlq/out/nonroot/authority-graph.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmplvtyuxlq/out/nonroot/authority-graph.manifest.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmplvtyuxlq/out/nonroot/bias-payload.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmplvtyuxlq/out/nonroot/bias-payload.manifest.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmplvtyuxlq/out/nonroot/inclusion-index.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmplvtyuxlq/out/nonroot/inclusion-index.manifest.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmplvtyuxlq/out/nonroot/reinforcement-brief.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmplvtyuxlq/out/nonroot/reinforcement-brief.manifest.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmplvtyuxlq/out/nonroot/reinforcement-brief.md
+...../var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmpwsprs04r/out/sample.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmpwsprs04r/out/sample.manifest.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmpwsprs04r/out/e2e/authority-graph.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmpwsprs04r/out/e2e/authority-graph.manifest.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmpwsprs04r/out/e2e/bias-payload.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmpwsprs04r/out/e2e/bias-payload.manifest.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmpwsprs04r/out/e2e/inclusion-index.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmpwsprs04r/out/e2e/inclusion-index.manifest.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmpwsprs04r/out/e2e/reinforcement-brief.json
+
+thinking
+**Planning git diff and assumptions note**
+exec
+/bin/zsh -lc 'git status --short' in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2 succeeded in 51ms:
+ M src/cli/ingest_url.py
+ M src/pipeline/extract.py
+ M tests/test_extract.py
+ M tests/test_ingest_url.py
+?? src/pipeline/url_ingest.py
+
+thinking
+**Planning clickable file references**
+exec
+/bin/zsh -lc "nl -ba src/pipeline/extract.py | sed -n '1,280p'" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2exec
+/bin/zsh -lc "nl -ba tests/test_ingest_url.py | sed -n '1,260p'" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2exec
+/bin/zsh -lc "nl -ba src/pipeline/url_ingest.py | sed -n '1,240p'" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2exec
+/bin/zsh -lc "nl -ba tests/test_extract.py | sed -n '1,260p'" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2exec
+/bin/zsh -lc "nl -ba src/cli/ingest_url.py | sed -n '1,240p'" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2 succeeded in 52ms:
+     1	from __future__ import annotations
+     2	
+     3	import unittest
+     4	from unittest.mock import MagicMock, patch
+     5	
+     6	from src.pipeline.extract import (
+     7	    DEFAULT_MAX_RESPONSE_BYTES,
+     8	    URLIngestError,
+     9	    fetch_url_text,
+    10	    html_to_text,
+    11	)
+    12	
+    13	
+    14	class ExtractTests(unittest.TestCase):
+    15	    def test_html_to_text_removes_script_and_style(self) -> None:
+    16	        html = """
+    17	        <html><head><style>.x{color:red}</style><script>alert(1)</script></head>
+    18	        <body><h1>Geo2</h1><p>Hello world.</p></body></html>
+    19	        """
+    20	        text = html_to_text(html)
+ succeeded in 52ms:
+     1	from __future__ import annotations
+     2	
+     3	import json
+     4	import subprocess
+     5	import sys
+     6	import unittest
+     7	from pathlib import Path
+     8	from tempfile import TemporaryDirectory
+     9	from unittest.mock import MagicMock, patch
+    10	
+    11	from src.cli.ingest_url import main
+    12	
+    13	
+    14	class IngestURLCommandTests(unittest.TestCase):
+    15	    def test_ingest_url_command_writes_outputs_with_mocked_fetch(self) -> None:
+    16	        with TemporaryDirectory() as tmp:
+    17	            out_dir = Path(tmp) / "out"
+    18	            response = MagicMock()
+    19	            response.read.return_value = b"<html><body><p>Alice Johnson launched Atlas Widget.</p></body></html>"
+    20	            response.geturl.return_value = "https://example.com/article"
+ succeeded in 52ms:
+     1	from __future__ import annotations
+     2	
+     3	import re
+     4	from dataclasses import dataclass
+     5	from pathlib import Path
+     6	from urllib.parse import urlparse
+     7	
+     8	from src.pipeline.core import build_output_document, build_run_manifest, write_json
+     9	from src.pipeline.extract import (
+    10	    DEFAULT_BLOCKED_DOMAINS,
+    11	    DEFAULT_MAX_RESPONSE_BYTES,
+    12	    DEFAULT_URL_TIMEOUT_SECONDS,
+    13	    URLCrawlResult,
+    14	    crawl_url,
+    15	)
+    16	
+    17	
+    18	@dataclass(frozen=True)
+    19	class URLIngestionResult:
+    20	    output_path: Path
+ succeeded in 52ms:
+     1	from __future__ import annotations
+     2	
+     3	import ipaddress
+     4	import re
+     5	import urllib.error
+     6	import urllib.request
+     7	from dataclasses import dataclass
+     8	from html.parser import HTMLParser
+     9	from urllib.parse import urlparse
+    10	
+    11	DEFAULT_URL_TIMEOUT_SECONDS = 20
+    12	DEFAULT_MAX_RESPONSE_BYTES = 2_000_000
+    13	DEFAULT_BLOCKED_DOMAINS = (
+    14	    "localhost",
+    15	    "localdomain",
+    16	    "metadata.google.internal",
+    17	    "169.254.169.254",
+    18	)
+    19	BLOCKED_DOMAIN_SUFFIXES = (".local", ".internal")
+    20	_ALLOWED_CONTENT_TYPE_MARKERS = ("text/", "json", "xml", "javascript")
+ succeeded in 51ms:
+     1	from __future__ import annotations
+     2	
+     3	import argparse
+     4	from pathlib import Path
+     5	
+     6	from src.pipeline.extract import (
+     7	    DEFAULT_BLOCKED_DOMAINS,
+     8	    DEFAULT_MAX_RESPONSE_BYTES,
+     9	    DEFAULT_URL_TIMEOUT_SECONDS,
+    10	    URLIngestError,
+    11	)
+    12	from src.pipeline.url_ingest import ingest_url_to_artifacts
+    13	
+    14	
+    15	def parse_args() -> argparse.Namespace:
+    16	    parser = argparse.ArgumentParser(description="Ingest content from a URL and emit structured JSON.")
+    17	    parser.add_argument("url", type=str, help="HTTP(S) URL to ingest")
+    18	    parser.add_argument("--out-dir", type=Path, default=Path("out"), help="Output directory (default: out)")
+    19	    parser.add_argument(
+    20	        "--name",
+
+thinking
+**Adjusting blocked domains merging**
+exec
+/bin/zsh -lc "perl -0pi -e 's/blocked_domains = tuple\\(args\\.blocked_domains\\) if args\\.blocked_domains else DEFAULT_BLOCKED_DOMAINS/blocked_domains = tuple(sorted(set(DEFAULT_BLOCKED_DOMAINS).union(args.blocked_domains or [])))/' src/cli/ingest_url.py" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2 succeeded in 52ms:
+
+
+thinking
+**Rerunning relevant tests**
+exec
+/bin/zsh -lc 'python3 -m unittest tests.test_extract tests.test_ingest_url' in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2 succeeded in 206ms:
+........
+----------------------------------------------------------------------
+Ran 8 tests in 0.076s
+
+OK
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmpvkrd1sia/out/article.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmpvkrd1sia/out/article.manifest.json
+crawl url=https://example.com/article bytes=69 contentType=text/html; charset=utf-8
+
+thinking
+**Rerunning full test suite**
+exec
+/bin/zsh -lc "python3 -m unittest discover -s tests -p 'test_*.py'" in /private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2 succeeded in 660ms:
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmpvuuxg2ic/out/nonroot/ingest/ingest.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmpvuuxg2ic/out/nonroot/ingest/ingest.manifest.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmpvuuxg2ic/out/nonroot/authority-graph.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmpvuuxg2ic/out/nonroot/authority-graph.manifest.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmpvuuxg2ic/out/nonroot/bias-payload.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmpvuuxg2ic/out/nonroot/bias-payload.manifest.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmpvuuxg2ic/out/nonroot/inclusion-index.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmpvuuxg2ic/out/nonroot/inclusion-index.manifest.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmpvuuxg2ic/out/nonroot/reinforcement-brief.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmpvuuxg2ic/out/nonroot/reinforcement-brief.manifest.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmpvuuxg2ic/out/nonroot/reinforcement-brief.md
+...../var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmpawrljvif/out/sample.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmpawrljvif/out/sample.manifest.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmpawrljvif/out/e2e/authority-graph.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmpawrljvif/out/e2e/authority-graph.manifest.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmpawrljvif/out/e2e/bias-payload.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmpawrljvif/out/e2e/bias-payload.manifest.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmpawrljvif/out/e2e/inclusion-index.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmpawrljvif/out/e2e/inclusion-index.manifest.json
+/var/folders/70/02hry64s12q918c3zygpvtyr0000gn/T/tmpawrljvif/out/e2e/reinforcement-brief.json
+
+thinking
+**Crafting final response structure**
+codex
+Implemented GEO2 URL crawl ingestion with bounded, deterministic URL fetching and tests.
+
+**File Scope**
+- [src/pipeline/extract.py](/private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2/src/pipeline/extract.py):1
+- [src/pipeline/url_ingest.py](/private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2/src/pipeline/url_ingest.py):1
+- [src/cli/ingest_url.py](/private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2/src/cli/ingest_url.py):1
+- [tests/test_extract.py](/private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2/tests/test_extract.py):1
+- [tests/test_ingest_url.py](/private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2/tests/test_ingest_url.py):1
+
+**What Was Added**
+- URL validation and safety controls:
+  - Only `http/https`
+  - Hostname required
+  - URL userinfo blocked
+  - Blocked/unsafe host checks (`localhost`, metadata/internal hosts, private/loopback/link-local/reserved IPs)
+- Bounded network behavior:
+  - Explicit timeout (`--timeout-seconds`)
+  - Explicit max response size (`--max-bytes`)
+  - `Content-Length` pre-check + read-limit enforcement
+- Deterministic failure modes via coded errors:
+  - `INVALID_URL`, `UNSAFE_URL`, `BLOCKED_DOMAIN`, `TIMEOUT`, `FETCH_FAILED`, `OVERSIZED_RESPONSE`, `UNSUPPORTED_CONTENT_TYPE`, `EMPTY_CONTENT`
+- Normalized text extraction preserved (HTML visible text + whitespace normalization).
+- New backend ingestion path (`ingest_url_to_artifacts`) that accepts URL input and writes ingest artifacts.
+- Crawl observability:
+  - Manifest now includes a `crawl` section (source/final URL, content type, bytes fetched, limits, blocked domains)
+  - CLI prints crawl summary line in logs.
+
+**Tests**
+- Added/updated tests for:
+  - Happy path
+  - Invalid URL
+  - Timeout
+  - Blocked domain
+  - Oversized response
+- Ran successfully:
+  - `python3 -m unittest tests.test_extract tests.test_ingest_url`
+  - `python3 -m unittest discover -s tests -p 'test_*.py'`
+
+**Assumptions (for PR body)**
+- “API/backend path” interpreted as a reusable backend ingestion function (`src/pipeline/url_ingest.py`) used by the CLI tool.
+- Domain blocking is implemented with deterministic local validation (host/IP class checks + explicit blocked domain list), without DNS resolution side effects.
+- Crawl observability is satisfied via manifest `crawl` metadata and CLI log output.
+
+**Definition-of-Done Gaps I Could Not Complete Here**
+- PR creation, target branch wiring, CI status on remote, and merge-conflict verification were not possible from this environment.
+- `.clawdbot/policies/definition-of-done.md` was not present in this workspace, so I could not validate against that local file.
+
+Next steps:
+1. Open PR to `origin/main` and paste the assumptions above into the PR body.
+2. Run remote CI and confirm required checks pass.
+tokens used
+43,188
+Implemented GEO2 URL crawl ingestion with bounded, deterministic URL fetching and tests.
+
+**File Scope**
+- [src/pipeline/extract.py](/private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2/src/pipeline/extract.py):1
+- [src/pipeline/url_ingest.py](/private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2/src/pipeline/url_ingest.py):1
+- [src/cli/ingest_url.py](/private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2/src/cli/ingest_url.py):1
+- [tests/test_extract.py](/private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2/tests/test_extract.py):1
+- [tests/test_ingest_url.py](/private/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2/tests/test_ingest_url.py):1
+
+**What Was Added**
+- URL validation and safety controls:
+  - Only `http/https`
+  - Hostname required
+  - URL userinfo blocked
+  - Blocked/unsafe host checks (`localhost`, metadata/internal hosts, private/loopback/link-local/reserved IPs)
+- Bounded network behavior:
+  - Explicit timeout (`--timeout-seconds`)
+  - Explicit max response size (`--max-bytes`)
+  - `Content-Length` pre-check + read-limit enforcement
+- Deterministic failure modes via coded errors:
+  - `INVALID_URL`, `UNSAFE_URL`, `BLOCKED_DOMAIN`, `TIMEOUT`, `FETCH_FAILED`, `OVERSIZED_RESPONSE`, `UNSUPPORTED_CONTENT_TYPE`, `EMPTY_CONTENT`
+- Normalized text extraction preserved (HTML visible text + whitespace normalization).
+- New backend ingestion path (`ingest_url_to_artifacts`) that accepts URL input and writes ingest artifacts.
+- Crawl observability:
+  - Manifest now includes a `crawl` section (source/final URL, content type, bytes fetched, limits, blocked domains)
+  - CLI prints crawl summary line in logs.
+
+**Tests**
+- Added/updated tests for:
+  - Happy path
+  - Invalid URL
+  - Timeout
+  - Blocked domain
+  - Oversized response
+- Ran successfully:
+  - `python3 -m unittest tests.test_extract tests.test_ingest_url`
+  - `python3 -m unittest discover -s tests -p 'test_*.py'`
+
+**Assumptions (for PR body)**
+- “API/backend path” interpreted as a reusable backend ingestion function (`src/pipeline/url_ingest.py`) used by the CLI tool.
+- Domain blocking is implemented with deterministic local validation (host/IP class checks + explicit blocked domain list), without DNS resolution side effects.
+- Crawl observability is satisfied via manifest `crawl` metadata and CLI log output.
+
+**Definition-of-Done Gaps I Could Not Complete Here**
+- PR creation, target branch wiring, CI status on remote, and merge-conflict verification were not possible from this environment.
+- `.clawdbot/policies/definition-of-done.md` was not present in this workspace, so I could not validate against that local file.
+
+Next steps:
+1. Open PR to `origin/main` and paste the assumptions above into the PR body.
+2. Run remote CI and confirm required checks pass.

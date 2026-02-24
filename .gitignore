@@ -21,3 +21,5 @@ credentials.json
 
 # clawdbot runtime artifacts (logs are local, prompts and registry are tracked)
 .clawdbot/logs/
+!.clawdbot/logs/
+!.clawdbot/logs/.gitkeep

@@ -550,6 +550,7 @@ See [aieos.org](https://aieos.org) for the full schema and live examples.
 | `status` | Show full system status |
 | `channel doctor` | Run health checks for configured channels |
 | `integrations info <name>` | Show setup/status details for one integration |
+| `clawdbot create/kickoff/spawn/check/status/validate` | Minimal agent-swarm orchestration (worktrees + agent launch + PR/CI supervisor) |
 
 ## Development
 

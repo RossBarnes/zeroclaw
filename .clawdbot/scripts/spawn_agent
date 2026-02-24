@@ -44,6 +44,20 @@ update_task_status() {
      "$REGISTRY" > "$tmp" && mv "$tmp" "$REGISTRY"
 }
 
+update_task_spawn_meta() {
+  local id="$1" tmux_session="${2:-}"
+  local now
+  now="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  local tmp
+  tmp="$(mktemp)"
+
+  jq --arg id "$id" --arg ts "$tmux_session" --arg now "$now" \
+    '(.tasks[] | select(.id == $id)) |= (
+      .updated_at = $now |
+      .tmux_session = (if $ts == "" then null else $ts end)
+    )' "$REGISTRY" > "$tmp" && mv "$tmp" "$REGISTRY"
+}
+
 count_running() {
   jq '[.tasks[] | select(.status == "running")] | length' "$REGISTRY"
 }
@@ -147,16 +161,21 @@ main() {
 
       if [ "$use_tmux" = true ]; then
         local session="clawdbot-$task_id"
+        update_task_spawn_meta "$task_id" "$session"
         info "Starting in tmux session: $session"
         tmux new-session -d -s "$session" -c "$worktree_path" \
           "claude -p \"$prompt_file\" 2>&1 | tee -a \"$log_file\"; echo '[clawdbot] Agent exited. Press enter to close.'; read"
         info "Agent running in tmux. Attach with: tmux attach -t $session"
       else
+        update_task_spawn_meta "$task_id" ""
         info "Running agent in foreground (stdout+stderr -> log)..."
-        (
+        if ! (
           cd "$worktree_path"
           claude -p "$prompt_file" 2>&1 | tee -a "$log_file"
-        )
+        ); then
+          update_task_status "$task_id" "failed"
+          die "Claude agent exited with an error. See log: $log_file"
+        fi
         info "Agent process exited."
       fi
       ;;
@@ -169,16 +188,21 @@ main() {
 
       if [ "$use_tmux" = true ]; then
         local session="clawdbot-$task_id"
+        update_task_spawn_meta "$task_id" "$session"
         info "Starting in tmux session: $session"
         tmux new-session -d -s "$session" -c "$worktree_path" \
-          "codex --prompt-file \"$prompt_file\" 2>&1 | tee -a \"$log_file\"; echo '[clawdbot] Agent exited. Press enter to close.'; read"
+          "codex exec --full-auto - < \"$prompt_file\" 2>&1 | tee -a \"$log_file\"; echo '[clawdbot] Agent exited. Press enter to close.'; read"
         info "Agent running in tmux. Attach with: tmux attach -t $session"
       else
+        update_task_spawn_meta "$task_id" ""
         info "Running agent in foreground (stdout+stderr -> log)..."
-        (
+        if ! (
           cd "$worktree_path"
-          codex --prompt-file "$prompt_file" 2>&1 | tee -a "$log_file"
-        )
+          codex exec --full-auto - < "$prompt_file" 2>&1 | tee -a "$log_file"
+        ); then
+          update_task_status "$task_id" "failed"
+          die "Codex agent exited with an error. See log: $log_file"
+        fi
         info "Agent process exited."
       fi
       ;;

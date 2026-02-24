@@ -2,7 +2,8 @@
 # clawdbot — Agent swarm orchestration CLI for ZeroClaw.
 #
 # Usage:
-#   clawdbot create <task-id> "<description>" [agent-type]
+#   clawdbot create <task-id> "<description>" [agent-type] [--repo <path>]
+#   clawdbot kickoff <task-id> <brief-file> [agent-type] [--repo <path>]
 #   clawdbot spawn  <task-id>
 #   clawdbot check
 #   clawdbot status [task-id]
@@ -13,6 +14,9 @@
 #   AGENT_SWARM_HOME           — workspace root (default: ~/agent-swarm)
 #   AGENT_SWARM_MAX_PARALLEL   — max concurrent agents (default: 1)
 #   CLAWDBOT_USE_TMUX          — set to 1 to use tmux sessions (default: 0)
+#   CLAWDBOT_CHECK_TMUX        — set to 1 to enforce tmux session liveness in checks
+#   TELEGRAM_BOT_TOKEN         — optional Telegram bot token for ready notifications
+#   TELEGRAM_CHAT_ID           — optional Telegram chat id for ready notifications
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -30,7 +34,8 @@ print_help() {
 clawdbot — Agent Swarm Orchestration for ZeroClaw
 
 Usage:
-  clawdbot create <task-id> "<description>" [agent-type]
+  clawdbot create <task-id> "<description>" [agent-type] [--repo <path>]
+  clawdbot kickoff <task-id> <brief-file> [agent-type] [--repo <path>]
   clawdbot spawn  <task-id>
   clawdbot check
   clawdbot status [task-id]
@@ -43,6 +48,8 @@ Commands:
             agent-type: codex | claude (default: claude)
 
   spawn     Launch a coding agent against a task worktree
+
+  kickoff   Create a task from a technical brief and immediately spawn it
 
   check     Run supervisor check on all active tasks (uses gh CLI)
 
@@ -58,9 +65,14 @@ Environment Variables:
   AGENT_SWARM_HOME           Workspace root directory (default: ~/agent-swarm)
   AGENT_SWARM_MAX_PARALLEL   Max concurrent agents (default: 1)
   CLAWDBOT_USE_TMUX          Use tmux for agent sessions (default: 0)
+  CLAWDBOT_CHECK_TMUX        Enforce tmux liveness in supervisor checks (default: 0)
+  TELEGRAM_BOT_TOKEN         Optional Telegram bot token for ready notifications
+  TELEGRAM_CHAT_ID           Optional Telegram chat id for ready notifications
 
 Examples:
   clawdbot create fix-auth "Fix the OAuth token refresh bug"
+  clawdbot create fix-auth "Fix auth bug" codex --repo /path/to/repo
+  clawdbot kickoff billing-refactor ./briefs/billing-refactor.md codex --repo /path/to/repo
   clawdbot create add-search "Add full-text search to memory" codex
   clawdbot spawn fix-auth
   clawdbot check
@@ -121,13 +133,23 @@ main() {
   case "$cmd" in
     create)
       if [ $# -lt 2 ]; then
-        echo "Usage: clawdbot create <task-id> \"<description>\" [agent-type]" >&2
+        echo "Usage: clawdbot create <task-id> \"<description>\" [agent-type] [--repo <path>]" >&2
         exit 1
       fi
       local task_id="$1"
       local description="$2"
-      local agent_type="${3:-claude}"
-      exec "$SCRIPT_DIR/create_task" "$task_id" "$description" "origin/main" "" "$agent_type"
+      shift 2
+      local agent_type="claude"
+      local repo_path=""
+      if [ "${1:-}" != "" ] && [ "${1:-}" != "--repo" ]; then
+        agent_type="$1"
+        shift
+      fi
+      if [ "${1:-}" = "--repo" ]; then
+        [ -n "${2:-}" ] || die "--repo requires a path"
+        repo_path="$2"
+      fi
+      exec "$SCRIPT_DIR/create_task" "$task_id" "$description" "origin/main" "$repo_path" "$agent_type"
       ;;
 
     spawn)
@@ -136,6 +158,27 @@ main() {
         exit 1
       fi
       exec "$SCRIPT_DIR/spawn_agent" "$1"
+      ;;
+
+    kickoff)
+      if [ $# -lt 2 ]; then
+        echo "Usage: clawdbot kickoff <task-id> <brief-file> [agent-type] [--repo <path>]" >&2
+        exit 1
+      fi
+      local task_id="$1"
+      local brief_file="$2"
+      shift 2
+      local agent_type="claude"
+      local repo_path=""
+      if [ "${1:-}" != "" ] && [ "${1:-}" != "--repo" ]; then
+        agent_type="$1"
+        shift
+      fi
+      if [ "${1:-}" = "--repo" ]; then
+        [ -n "${2:-}" ] || die "--repo requires a path"
+        repo_path="$2"
+      fi
+      exec "$SCRIPT_DIR/kickoff_task" "$task_id" "$brief_file" "$agent_type" "$repo_path"
       ;;
 
     check)

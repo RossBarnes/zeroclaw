@@ -1,5 +1,70 @@
 {
   "$schema": "active-tasks.schema.json",
   "version": 1,
-  "tasks": []
+  "tasks": [
+    {
+      "id": "geo2-frontend-design-1",
+      "description": "# GEO2 Frontend Design",
+      "status": "running",
+      "agent_type": "codex",
+      "branch": "feat/geo2-frontend-design-1",
+      "base_branch": "origin/main",
+      "repo_path": "/Users/rossbarnes/Documents/GitHub/Geo2",
+      "worktree_path": "/tmp/agent-swarm/worktrees/geo2-frontend-design-1",
+      "tmux_session": "clawdbot-geo2-frontend-design-1",
+      "pr_number": null,
+      "pr_url": null,
+      "failure_reason": "switched from claude to codex due to missing Claude login",
+      "created_at": "2026-02-24T14:02:29Z",
+      "updated_at": "2026-02-24T14:19:41Z"
+    },
+    {
+      "id": "geo2-url-crawl-ingestion-1",
+      "description": "# GEO2 URL Crawl Ingestion",
+      "status": "failed",
+      "agent_type": "codex",
+      "branch": "feat/geo2-url-crawl-ingestion-1",
+      "base_branch": "origin/main",
+      "repo_path": "/Users/rossbarnes/Documents/GitHub/Geo2",
+      "worktree_path": "/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-1",
+      "tmux_session": null,
+      "pr_number": null,
+      "pr_url": null,
+      "failure_reason": "stale launch state reconciled before tmux relaunch",
+      "created_at": "2026-02-24T14:02:50Z",
+      "updated_at": "2026-02-24T14:12:32Z"
+    },
+    {
+      "id": "geo2-url-crawl-ingestion-2",
+      "description": "# GEO2 URL Crawl Ingestion",
+      "status": "running",
+      "agent_type": "codex",
+      "branch": "feat/geo2-url-crawl-ingestion-2",
+      "base_branch": "origin/main",
+      "repo_path": "/Users/rossbarnes/Documents/GitHub/Geo2",
+      "worktree_path": "/tmp/agent-swarm/worktrees/geo2-url-crawl-ingestion-2",
+      "tmux_session": "clawdbot-geo2-url-crawl-ingestion-2",
+      "pr_number": null,
+      "pr_url": null,
+      "failure_reason": null,
+      "created_at": "2026-02-24T14:07:31Z",
+      "updated_at": "2026-02-24T14:14:17Z"
+    },
+    {
+      "id": "geo2-bias-payloads-2",
+      "description": "# GEO2 Bias Payload Definitions",
+      "status": "running",
+      "agent_type": "codex",
+      "branch": "feat/geo2-bias-payloads-2",
+      "base_branch": "origin/main",
+      "repo_path": "/Users/rossbarnes/Documents/GitHub/Geo2",
+      "worktree_path": "/tmp/agent-swarm/worktrees/geo2-bias-payloads-2",
+      "tmux_session": "clawdbot-geo2-bias-payloads-2",
+      "pr_number": null,
+      "pr_url": null,
+      "failure_reason": null,
+      "created_at": "2026-02-24T14:09:33Z",
+      "updated_at": "2026-02-24T14:14:17Z"
+    }
+  ]
 }

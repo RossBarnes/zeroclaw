@@ -70,7 +70,8 @@ main() {
   local valid_statuses='["queued","running","pr_open","done","blocked","failed"]'
   local valid_agents='["codex","claude"]'
 
-  for i in $(seq 0 $((task_count - 1))); do
+  if [ "$task_count" -gt 0 ]; then
+    for i in $(seq 0 $((task_count - 1))); do
     local tid
     tid="$(jq -r ".tasks[$i].id // empty" "$REGISTRY")"
 
@@ -93,6 +94,13 @@ main() {
       fi
     done
 
+    # repo_path is optional for backward compatibility, but should be present on new tasks.
+    local repo_path
+    repo_path="$(jq -r ".tasks[$i].repo_path // empty" "$REGISTRY" 2>/dev/null || echo "")"
+    if [ -z "$repo_path" ]; then
+      info "Task '$tid': repo_path missing (legacy entry, allowed)"
+    fi
+
     # Validate status
     local task_status
     task_status="$(jq -r ".tasks[$i].status" "$REGISTRY")"
@@ -113,7 +121,8 @@ main() {
     if [[ ! "$task_branch" =~ ^feat/ ]]; then
       fail "Task '$tid': branch '$task_branch' does not start with 'feat/'"
     fi
-  done
+    done
+  fi
 
   # Check for duplicate IDs
   local unique_count

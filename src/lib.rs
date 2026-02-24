@@ -40,6 +40,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod agent;
 pub mod channels;
+pub mod clawdbot;
 pub mod config;
 pub mod cost;
 pub mod cron;
@@ -121,6 +122,45 @@ pub enum SkillCommands {
         /// Skill name to remove
         name: String,
     },
+}
+
+/// clawdbot orchestration subcommands
+#[derive(Subcommand, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ClawdbotCommands {
+    /// Create a new swarm task
+    Create {
+        /// Task identifier (alphanumeric and hyphens)
+        task_id: String,
+        /// Problem description for the task
+        description: String,
+        /// Agent to use (claude or codex)
+        #[arg(long)]
+        agent: Option<String>,
+    },
+    /// Create task from a brief file and spawn agent immediately
+    Kickoff {
+        /// Task identifier (alphanumeric and hyphens)
+        task_id: String,
+        /// Path to technical brief markdown/text file
+        brief_file: String,
+        /// Agent to use (claude or codex)
+        #[arg(long)]
+        agent: Option<String>,
+    },
+    /// Spawn the selected agent for an existing task
+    Spawn {
+        /// Task identifier
+        task_id: String,
+    },
+    /// Run deterministic PR/CI supervisor checks
+    Check,
+    /// Show task status (all tasks, or one task by id)
+    Status {
+        /// Optional task identifier
+        task_id: Option<String>,
+    },
+    /// Validate registry structure
+    Validate,
 }
 
 /// Migration subcommands

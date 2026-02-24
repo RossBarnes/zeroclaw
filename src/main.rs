@@ -39,6 +39,7 @@ use tracing_subscriber::{fmt, EnvFilter};
 
 mod agent;
 mod channels;
+mod clawdbot;
 mod rag {
     pub use zeroclaw::rag::*;
 }
@@ -207,6 +208,12 @@ enum Commands {
     Skills {
         #[command(subcommand)]
         skill_command: SkillCommands,
+    },
+
+    /// Manage clawdbot swarm tasks
+    Clawdbot {
+        #[command(subcommand)]
+        clawdbot_command: zeroclaw::ClawdbotCommands,
     },
 
     /// Migrate data from other agent runtimes
@@ -558,6 +565,8 @@ async fn main() -> Result<()> {
         Commands::Skills { skill_command } => {
             skills::handle_command(skill_command, &config.workspace_dir)
         }
+
+        Commands::Clawdbot { clawdbot_command } => clawdbot::handle_command(clawdbot_command),
 
         Commands::Migrate { migrate_command } => {
             migration::handle_command(migrate_command, &config).await

@@ -27,6 +27,29 @@ export AGENT_SWARM_HOME=~/agent-swarm
 
 ## Usage
 
+You can run via script wrapper:
+
+```bash
+clawdbot <command> ...
+```
+
+Or via the Rust CLI:
+
+```bash
+zeroclaw clawdbot <command> ...
+```
+
+### Kick off from a technical brief
+
+```bash
+clawdbot kickoff <task-id> <brief-file> [agent-type]
+```
+
+This will:
+1. Create the worktree + task registry entry
+2. Build prompt content from the brief file
+3. Spawn the selected agent immediately
+
 ### Create a task
 
 ```bash
@@ -81,9 +104,11 @@ clawdbot check
 ```
 
 Runs the supervisor check on all `running` and `pr_open` tasks:
+- Verifies task branch exists locally and on `origin`
 - Queries GitHub for open PRs matching the task branch
 - Checks CI status via `gh pr checks`
-- Checks for merge conflicts
+- Checks for merge conflicts and out-of-date (`BEHIND`) PR branches
+- Optionally checks tmux session liveness (`CLAWDBOT_CHECK_TMUX=1`)
 - Enforces screenshot requirement for UI changes
 - Updates task status and writes notifications
 
@@ -130,6 +155,7 @@ and no duplicate IDs.
 └── scripts/
     ├── clawdbot              ← CLI dispatcher
     ├── create_task           ← create worktree + register task
+    ├── kickoff_task          ← create from brief + spawn
     ├── spawn_agent           ← launch agent CLI
     ├── supervisor_check      ← check PR/CI status
     └── validate_registry     ← schema self-check
@@ -142,6 +168,9 @@ and no duplicate IDs.
 | `AGENT_SWARM_HOME` | `~/agent-swarm` | Root workspace for worktrees |
 | `AGENT_SWARM_MAX_PARALLEL` | `1` | Max concurrent agent processes |
 | `CLAWDBOT_USE_TMUX` | `0` | Use tmux sessions for agents |
+| `CLAWDBOT_CHECK_TMUX` | `0` | Fail running tasks when tracked tmux session is dead |
+| `TELEGRAM_BOT_TOKEN` | unset | Optional Telegram bot token for ready notifications |
+| `TELEGRAM_CHAT_ID` | unset | Optional Telegram chat id for ready notifications |
 
 ## End-to-End Example
 
