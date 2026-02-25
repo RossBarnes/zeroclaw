@@ -5,7 +5,10 @@
 #   clawdbot create <task-id> "<description>" [agent-type] [--repo <path>]
 #   clawdbot kickoff <task-id> <brief-file> [agent-type] [--repo <path>]
 #   clawdbot spawn  <task-id>
+#   clawdbot queue-add <task-id> <brief-file> [agent-type] [--repo <path>] [--priority <0-100>]
+#   clawdbot queue-status
 #   clawdbot check
+#   clawdbot autopilot [--loop] [--interval-seconds N] [--max-launches N]
 #   clawdbot status [task-id]
 #   clawdbot validate
 #   clawdbot help
@@ -37,7 +40,10 @@ Usage:
   clawdbot create <task-id> "<description>" [agent-type] [--repo <path>]
   clawdbot kickoff <task-id> <brief-file> [agent-type] [--repo <path>]
   clawdbot spawn  <task-id>
+  clawdbot queue-add <task-id> <brief-file> [agent-type] [--repo <path>] [--priority <0-100>]
+  clawdbot queue-status
   clawdbot check
+  clawdbot autopilot [--loop] [--interval-seconds N] [--max-launches N]
   clawdbot status [task-id]
   clawdbot validate
   clawdbot help
@@ -50,6 +56,12 @@ Commands:
   spawn     Launch a coding agent against a task worktree
 
   kickoff   Create a task from a technical brief and immediately spawn it
+
+  queue-add Add a task brief to backlog for automatic scheduling
+
+  queue-status Show queued/in-progress/done backlog items
+
+  autopilot Run deterministic scheduler tick (or loop mode)
 
   check     Run supervisor check on all active tasks (uses gh CLI)
 
@@ -74,6 +86,8 @@ Examples:
   clawdbot create fix-auth "Fix auth bug" codex --repo /path/to/repo
   clawdbot kickoff billing-refactor ./briefs/billing-refactor.md codex --repo /path/to/repo
   clawdbot create add-search "Add full-text search to memory" codex
+  clawdbot queue-add ui-polish .clawdbot/briefs/ui-polish.md codex --repo /path/to/repo --priority 80
+  clawdbot autopilot --loop --interval-seconds 180
   clawdbot spawn fix-auth
   clawdbot check
   clawdbot status fix-auth
@@ -183,6 +197,18 @@ main() {
 
     check)
       exec "$SCRIPT_DIR/supervisor_check"
+      ;;
+
+    queue-add)
+      exec "$SCRIPT_DIR/queue_add" "$@"
+      ;;
+
+    queue-status)
+      exec "$SCRIPT_DIR/queue_status"
+      ;;
+
+    autopilot)
+      exec "$SCRIPT_DIR/autopilot_tick" "$@"
       ;;
 
     status)

@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CLAWDBOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+BACKLOG="$CLAWDBOT_DIR/registry/task-backlog.json"
+
+DEFAULT_MAX_RETRIES="${CLAWDBOT_MAX_RETRIES:-1}"
+
+die() { echo "error: $*" >&2; exit 1; }
+info() { echo ":: $*"; }
+
+ensure_jq() { command -v jq >/dev/null 2>&1 || die "jq is required but not installed."; }
+
+ensure_backlog() {
+  mkdir -p "$CLAWDBOT_DIR/registry"
+  if [ ! -f "$BACKLOG" ]; then
+    echo '{"$schema":"task-backlog.schema.json","version":1,"tasks":[]}' > "$BACKLOG"
+  fi
+}
+
+validate_task_id() {
+  local id="$1"
+  [[ "$id" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]*$ ]] || die "Invalid task id '$id'"
+}
+
+main() {
+  if [ $# -lt 2 ]; then
+    echo "Usage: queue_add <task-id> <brief-file> [agent-type] [--repo <path>] [--priority <0-100>]" >&2
+    exit 1
+  fi
+
+  local task_id="$1"
+  local brief_file="$2"
+  shift 2
+
+  local agent_type="codex"
+  local repo_path=""
+  local priority="50"
+
+  if [ "${1:-}" != "" ] && [ "${1:-}" != "--repo" ] && [ "${1:-}" != "--priority" ]; then
+    agent_type="$1"
+    shift
+  fi
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --repo)
+        [ -n "${2:-}" ] || die "--repo requires a path"
+        repo_path="$2"
+        shift 2
+        ;;
+      --priority)
+        [ -n "${2:-}" ] || die "--priority requires a number"
+        priority="$2"
+        shift 2
+        ;;
+      *)
+        die "Unknown argument: $1"
+        ;;
+    esac
+  done
+
+  ensure_jq
+  ensure_backlog
+  validate_task_id "$task_id"
+  [ -f "$brief_file" ] || die "Brief file not found: $brief_file"
+
+  case "$agent_type" in
+    codex|claude) ;;
+    *) die "agent-type must be codex|claude" ;;
+  esac
+
+  [[ "$priority" =~ ^[0-9]+$ ]] || die "priority must be integer"
+  [ "$priority" -ge 0 ] && [ "$priority" -le 100 ] || die "priority must be 0..100"
+
+  local now
+  now="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  local tmp
+  tmp="$(mktemp)"
+
+  jq --arg id "$task_id" --arg brief "$brief_file" --arg agent "$agent_type" --arg repo "$repo_path" \
+     --argjson pri "$priority" --arg now "$now" --argjson mr "$DEFAULT_MAX_RETRIES" '
+    if ([.tasks[] | select(.id == $id)] | length) > 0
+    then error("task already exists in backlog: " + $id)
+    else .tasks += [{
+      id: $id,
+      brief_file: $brief,
+      agent_type: $agent,
+      repo_path: (if $repo == "" then null else $repo end),
+      priority: $pri,
+      status: "pending",
+      retries: 0,
+      max_retries: $mr,
+      linked_task_id: null,
+      last_error: null,
+      created_at: $now,
+      updated_at: $now
+    }] end
+  ' "$BACKLOG" > "$tmp" && mv "$tmp" "$BACKLOG"
+
+  info "Queued $task_id (agent=$agent_type, priority=$priority)"
+}
+
+main "$@"

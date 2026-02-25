@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CLAWDBOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+BACKLOG="$CLAWDBOT_DIR/registry/task-backlog.json"
+
+command -v jq >/dev/null 2>&1 || { echo "error: jq is required" >&2; exit 1; }
+
+if [ ! -f "$BACKLOG" ]; then
+  echo "No backlog found."
+  exit 0
+fi
+
+count="$(jq '.tasks | length' "$BACKLOG")"
+echo "Backlog tasks: $count"
+if [ "$count" -eq 0 ]; then
+  exit 0
+fi
+
+printf "  %-26s %-12s %-8s %-8s %-8s %s\n" "ID" "STATUS" "AGENT" "PRIOR" "RETRY" "BRIEF"
+printf "  %-26s %-12s %-8s %-8s %-8s %s\n" "---" "---" "---" "---" "---" "---"
+jq -r '.tasks[] | "\(.id)|\(.status)|\(.agent_type)|\(.priority)|\(.retries)/\(.max_retries)|\(.brief_file)"' "$BACKLOG" \
+  | while IFS='|' read -r id status agent pri retry brief; do
+      printf "  %-26s %-12s %-8s %-8s %-8s %s\n" "$id" "$status" "$agent" "$pri" "$retry" "$brief"
+    done

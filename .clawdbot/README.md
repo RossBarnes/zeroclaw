@@ -118,6 +118,27 @@ Status transitions:
 - `pr_open` → `failed` (when CI checks fail)
 - `pr_open` → `blocked` (merge conflicts or missing screenshot)
 
+### Backlog + Autopilot
+
+```bash
+# Add backlog items
+clawdbot queue-add <task-id> <brief-file> [agent-type] [--repo <path>] [--priority <0-100>]
+
+# View backlog
+clawdbot queue-status
+
+# Run one deterministic scheduling tick
+clawdbot autopilot
+
+# Run continuous loop
+clawdbot autopilot --loop --interval-seconds 180
+```
+
+Autopilot behavior:
+1. Runs `clawdbot check`
+2. Reconciles in-progress backlog items with active task states
+3. Launches highest-priority pending backlog tasks into free slots
+
 ### View status
 
 ```bash
@@ -156,6 +177,9 @@ and no duplicate IDs.
     ├── clawdbot              ← CLI dispatcher
     ├── create_task           ← create worktree + register task
     ├── kickoff_task          ← create from brief + spawn
+    ├── queue_add             ← add backlog item
+    ├── queue_status          ← list backlog items
+    ├── autopilot_tick        ← deterministic scheduler
     ├── spawn_agent           ← launch agent CLI
     ├── supervisor_check      ← check PR/CI status
     └── validate_registry     ← schema self-check
