@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# kickoff_task — create + prompt from brief + spawn in one command.
+#
+# Usage:
+#   kickoff_task <task-id> <brief-file> [agent-type] [repo-path]
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CLAWDBOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+die()  { echo "error: $*" >&2; exit 1; }
+info() { echo ":: $*"; }
+
+main() {
+  if [ $# -lt 2 ]; then
+    echo "Usage: kickoff_task <task-id> <brief-file> [agent-type] [repo-path]" >&2
+    exit 1
+  fi
+
+  local task_id="$1"
+  local brief_file="$2"
+  local agent_type="${3:-claude}"
+  local repo_path="${4:-}"
+
+  [ -f "$brief_file" ] || die "Brief file not found: $brief_file"
+
+  local description
+  description="$(head -n 1 "$brief_file" | sed 's/^#\+\s*//' | xargs)"
+  [ -n "$description" ] || description="Implement task from technical brief"
+
+  "$SCRIPT_DIR/create_task" "$task_id" "$description" "origin/main" "$repo_path" "$agent_type"
+
+  local prompt_file="$CLAWDBOT_DIR/prompts/$task_id.md"
+
+  # Insert brief verbatim after heading while keeping shell-safe write path.
+  {
+    echo "# Task: $task_id"
+    echo
+    echo "## Problem Statement"
+    echo
+    echo "Implement the technical brief exactly as specified."
+    echo
+    echo "## Acceptance Criteria"
+    echo
+    echo "- [ ] All requirements in the brief are implemented"
+    echo "- [ ] Non-goals in the brief are respected"
+    echo "- [ ] Any assumptions are documented in the PR body"
+    echo
+    echo "## Definition of Done"
+    echo
+    echo "See: .clawdbot/policies/definition-of-done.md"
+    echo
+    echo "- [ ] PR exists targeting origin/main"
+    echo "- [ ] CI checks pass"
+    echo "- [ ] No merge conflicts"
+    echo "- [ ] Screenshot included (if UI changes)"
+    echo
+    echo "## File Scope"
+    echo
+    echo "(fill based on the brief before coding)"
+    echo
+    echo "## Technical Brief"
+    echo
+    cat "$brief_file"
+  } > "$prompt_file"
+
+  info "Prepared prompt from brief: $prompt_file"
+  "$SCRIPT_DIR/spawn_agent" "$task_id"
+}
+
+main "$@"

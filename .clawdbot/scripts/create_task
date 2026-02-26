@@ -26,11 +26,18 @@ ensure_jq() {
 }
 
 ensure_registry() {
+  mkdir -p "$CLAWDBOT_DIR/registry" "$CLAWDBOT_DIR/prompts" "$CLAWDBOT_DIR/logs"
   if [ ! -f "$REGISTRY" ]; then
-    mkdir -p "$(dirname "$REGISTRY")"
     echo '{"version":1,"tasks":[]}' > "$REGISTRY"
     info "Created empty registry at $REGISTRY"
   fi
+}
+
+validate_repo_path() {
+  local path="$1"
+  [ -d "$path" ] || die "Repo path does not exist: $path"
+  git -C "$path" rev-parse --show-toplevel >/dev/null 2>&1 \
+    || die "Repo path is not a git repository: $path"
 }
 
 validate_task_id() {
@@ -65,6 +72,8 @@ main() {
 
   ensure_jq
   validate_task_id "$task_id"
+  validate_repo_path "$repo_path"
+  repo_path="$(cd "$repo_path" && pwd)"
 
   # Validate agent type
   case "$agent_type" in
@@ -143,6 +152,7 @@ PROMPT
      --arg agent "$agent_type" \
      --arg branch "$branch" \
      --arg base "$base_branch" \
+     --arg repo "$repo_path" \
      --arg wt "$worktree_path" \
      --arg now "$now" \
      '.tasks += [{
@@ -152,7 +162,9 @@ PROMPT
        agent_type: $agent,
        branch: $branch,
        base_branch: $base,
+       repo_path: $repo,
        worktree_path: $wt,
+       tmux_session: null,
        pr_number: null,
        pr_url: null,
        failure_reason: null,

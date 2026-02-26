@@ -1,0 +1,206 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CLAWDBOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+ACTIVE="$CLAWDBOT_DIR/registry/active-tasks.json"
+BACKLOG="$CLAWDBOT_DIR/registry/task-backlog.json"
+MAX_PARALLEL="${AGENT_SWARM_MAX_PARALLEL:-1}"
+MAX_LAUNCHES_PER_TICK="${CLAWDBOT_AUTOPILOT_MAX_LAUNCHES:-3}"
+INTERVAL_SECS=180
+LOOP=0
+
+: "${CLAWDBOT_CHECK_TMUX:=1}"
+export CLAWDBOT_CHECK_TMUX
+
+now() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
+die() { echo "error: $*" >&2; exit 1; }
+info() { echo ":: $*"; }
+ensure_jq() { command -v jq >/dev/null 2>&1 || die "jq is required"; }
+
+ensure_files() {
+  mkdir -p "$CLAWDBOT_DIR/registry"
+  [ -f "$ACTIVE" ] || echo '{"$schema":"active-tasks.schema.json","version":1,"tasks":[]}' > "$ACTIVE"
+  [ -f "$BACKLOG" ] || echo '{"$schema":"task-backlog.schema.json","version":1,"tasks":[]}' > "$BACKLOG"
+}
+
+update_backlog_with_filter() {
+  local id="$1"
+  local filter="$2"
+  local ts tmp
+  ts="$(now)"
+  tmp="$(mktemp)"
+  jq --arg id "$id" --arg now "$ts" "$filter" "$BACKLOG" > "$tmp" && mv "$tmp" "$BACKLOG"
+}
+
+mark_backlog_done() {
+  local id="$1"
+  update_backlog_with_filter "$id" '(.tasks[] | select(.id==$id)) |= (.status="done" | .updated_at=$now | .completed_at=$now)'
+}
+
+mark_backlog_pending_retry() {
+  local id="$1" reason="$2"
+  local ts tmp
+  ts="$(now)"
+  tmp="$(mktemp)"
+  jq --arg id "$id" --arg reason "$reason" --arg now "$ts" \
+    '(.tasks[] | select(.id==$id)) |= (.status="pending" | .retries=(.retries + 1) | .linked_task_id=null | .last_error=$reason | .updated_at=$now)' \
+    "$BACKLOG" > "$tmp" && mv "$tmp" "$BACKLOG"
+}
+
+mark_backlog_failed() {
+  local id="$1" reason="$2"
+  local ts tmp
+  ts="$(now)"
+  tmp="$(mktemp)"
+  jq --arg id "$id" --arg reason "$reason" --arg now "$ts" '(.tasks[] | select(.id==$id)) |= (.status="failed" | .last_error=$reason | .updated_at=$now)' "$BACKLOG" > "$tmp" && mv "$tmp" "$BACKLOG"
+}
+
+mark_backlog_in_progress() {
+  local id="$1" linked="$2"
+  local ts tmp
+  ts="$(now)"
+  tmp="$(mktemp)"
+  jq --arg id "$id" --arg linked "$linked" --arg now "$ts" '(.tasks[] | select(.id==$id)) |= (.status="in_progress" | .linked_task_id=$linked | .last_error=null | .updated_at=$now | .last_launched_at=$now)' "$BACKLOG" > "$tmp" && mv "$tmp" "$BACKLOG"
+}
+
+retries_for() { jq -r --arg id "$1" '.tasks[] | select(.id==$id) | .retries' "$BACKLOG"; }
+max_retries_for() { jq -r --arg id "$1" '.tasks[] | select(.id==$id) | .max_retries' "$BACKLOG"; }
+
+run_supervisor() {
+  if ! "$SCRIPT_DIR/supervisor_check"; then
+    info "supervisor_check returned non-zero; continuing"
+  fi
+}
+
+sync_backlog_states() {
+  local ids
+  ids="$(jq -r '.tasks[] | select(.status=="in_progress") | .id' "$BACKLOG")"
+  [ -n "$ids" ] || return 0
+
+  while IFS= read -r bid; do
+    [ -n "$bid" ] || continue
+    local linked task_status retries max_retries
+    linked="$(jq -r --arg id "$bid" '.tasks[] | select(.id==$id) | (.linked_task_id // "")' "$BACKLOG")"
+    [ -n "$linked" ] || continue
+
+    task_status="$(jq -r --arg tid "$linked" '.tasks[] | select(.id==$tid) | .status' "$ACTIVE")"
+    retries="$(retries_for "$bid")"
+    max_retries="$(max_retries_for "$bid")"
+
+    case "$task_status" in
+      done) mark_backlog_done "$bid" ;;
+      failed|blocked|"")
+        if [ "$retries" -lt "$max_retries" ]; then
+          mark_backlog_pending_retry "$bid" "linked task failed/blocked/missing"
+        else
+          mark_backlog_failed "$bid" "max retries reached"
+        fi
+        ;;
+      running|pr_open|queued) ;;
+    esac
+  done <<< "$ids"
+}
+
+launch_pending() {
+  local running slots launches
+  running="$(jq '[.tasks[] | select(.status=="running")] | length' "$ACTIVE")"
+  slots=$((MAX_PARALLEL - running))
+  [ "$slots" -gt 0 ] || { info "No free slots (running=$running max=$MAX_PARALLEL)"; return 0; }
+
+  launches=0
+  local ids
+  ids="$(jq -r '.tasks | map(select(.status=="pending")) | sort_by(-.priority, .created_at) | .[].id' "$BACKLOG")"
+  [ -n "$ids" ] || { info "No pending backlog tasks"; return 0; }
+
+  while IFS= read -r bid; do
+    [ -n "$bid" ] || continue
+    [ "$slots" -gt 0 ] || break
+    [ "$launches" -lt "$MAX_LAUNCHES_PER_TICK" ] || break
+
+    local brief agent repo retries max_retries launch_id
+    brief="$(jq -r --arg id "$bid" '.tasks[] | select(.id==$id) | .brief_file' "$BACKLOG")"
+    agent="$(jq -r --arg id "$bid" '.tasks[] | select(.id==$id) | .agent_type' "$BACKLOG")"
+    repo="$(jq -r --arg id "$bid" '.tasks[] | select(.id==$id) | (.repo_path // "")' "$BACKLOG")"
+    retries="$(retries_for "$bid")"
+    max_retries="$(max_retries_for "$bid")"
+
+    if [ ! -f "$brief" ]; then
+      mark_backlog_failed "$bid" "brief file missing"
+      continue
+    fi
+
+    if [ "$retries" -gt 0 ]; then
+      launch_id="${bid}-r$((retries + 1))"
+    else
+      launch_id="$bid"
+    fi
+
+    if [ -n "$repo" ] && [ "$repo" != "null" ]; then
+      if "$SCRIPT_DIR/kickoff_task" "$launch_id" "$brief" "$agent" "$repo"; then
+        mark_backlog_in_progress "$bid" "$launch_id"
+        slots=$((slots - 1))
+        launches=$((launches + 1))
+      else
+        if [ "$retries" -lt "$max_retries" ]; then
+          mark_backlog_pending_retry "$bid" "kickoff failed"
+        else
+          mark_backlog_failed "$bid" "kickoff failed and retries exhausted"
+        fi
+      fi
+    else
+      if "$SCRIPT_DIR/kickoff_task" "$launch_id" "$brief" "$agent"; then
+        mark_backlog_in_progress "$bid" "$launch_id"
+        slots=$((slots - 1))
+        launches=$((launches + 1))
+      else
+        if [ "$retries" -lt "$max_retries" ]; then
+          mark_backlog_pending_retry "$bid" "kickoff failed"
+        else
+          mark_backlog_failed "$bid" "kickoff failed and retries exhausted"
+        fi
+      fi
+    fi
+  done <<< "$ids"
+}
+
+tick_once() {
+  info "autopilot tick start"
+  run_supervisor
+  sync_backlog_states
+  launch_pending
+  info "autopilot tick end"
+}
+
+main() {
+  ensure_jq
+  ensure_files
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --loop) LOOP=1; shift ;;
+      --interval-seconds)
+        [ -n "${2:-}" ] || die "--interval-seconds requires a value"
+        INTERVAL_SECS="$2"
+        shift 2
+        ;;
+      --max-launches)
+        [ -n "${2:-}" ] || die "--max-launches requires a value"
+        MAX_LAUNCHES_PER_TICK="$2"
+        shift 2
+        ;;
+      *) die "Unknown argument: $1" ;;
+    esac
+  done
+
+  if [ "$LOOP" -eq 1 ]; then
+    while true; do
+      tick_once
+      sleep "$INTERVAL_SECS"
+    done
+  else
+    tick_once
+  fi
+}
+
+main "$@"

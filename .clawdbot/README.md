@@ -27,6 +27,29 @@ export AGENT_SWARM_HOME=~/agent-swarm
 
 ## Usage
 
+You can run via script wrapper:
+
+```bash
+clawdbot <command> ...
+```
+
+Or via the Rust CLI:
+
+```bash
+zeroclaw clawdbot <command> ...
+```
+
+### Kick off from a technical brief
+
+```bash
+clawdbot kickoff <task-id> <brief-file> [agent-type]
+```
+
+This will:
+1. Create the worktree + task registry entry
+2. Build prompt content from the brief file
+3. Spawn the selected agent immediately
+
 ### Create a task
 
 ```bash
@@ -81,9 +104,11 @@ clawdbot check
 ```
 
 Runs the supervisor check on all `running` and `pr_open` tasks:
+- Verifies task branch exists locally and on `origin`
 - Queries GitHub for open PRs matching the task branch
 - Checks CI status via `gh pr checks`
-- Checks for merge conflicts
+- Checks for merge conflicts and out-of-date (`BEHIND`) PR branches
+- Optionally checks tmux session liveness (`CLAWDBOT_CHECK_TMUX=1`)
 - Enforces screenshot requirement for UI changes
 - Updates task status and writes notifications
 
@@ -92,6 +117,27 @@ Status transitions:
 - `pr_open` → `done` (when CI passes and definition-of-done is met)
 - `pr_open` → `failed` (when CI checks fail)
 - `pr_open` → `blocked` (merge conflicts or missing screenshot)
+
+### Backlog + Autopilot
+
+```bash
+# Add backlog items
+clawdbot queue-add <task-id> <brief-file> [agent-type] [--repo <path>] [--priority <0-100>]
+
+# View backlog
+clawdbot queue-status
+
+# Run one deterministic scheduling tick
+clawdbot autopilot
+
+# Run continuous loop
+clawdbot autopilot --loop --interval-seconds 180
+```
+
+Autopilot behavior:
+1. Runs `clawdbot check`
+2. Reconciles in-progress backlog items with active task states
+3. Launches highest-priority pending backlog tasks into free slots
 
 ### View status
 
@@ -130,6 +176,10 @@ and no duplicate IDs.
 └── scripts/
     ├── clawdbot              ← CLI dispatcher
     ├── create_task           ← create worktree + register task
+    ├── kickoff_task          ← create from brief + spawn
+    ├── queue_add             ← add backlog item
+    ├── queue_status          ← list backlog items
+    ├── autopilot_tick        ← deterministic scheduler
     ├── spawn_agent           ← launch agent CLI
     ├── supervisor_check      ← check PR/CI status
     └── validate_registry     ← schema self-check
@@ -142,6 +192,9 @@ and no duplicate IDs.
 | `AGENT_SWARM_HOME` | `~/agent-swarm` | Root workspace for worktrees |
 | `AGENT_SWARM_MAX_PARALLEL` | `1` | Max concurrent agent processes |
 | `CLAWDBOT_USE_TMUX` | `0` | Use tmux sessions for agents |
+| `CLAWDBOT_CHECK_TMUX` | `0` | Fail running tasks when tracked tmux session is dead |
+| `TELEGRAM_BOT_TOKEN` | unset | Optional Telegram bot token for ready notifications |
+| `TELEGRAM_CHAT_ID` | unset | Optional Telegram chat id for ready notifications |
 
 ## End-to-End Example
 

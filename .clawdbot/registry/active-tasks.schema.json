@@ -35,8 +35,14 @@
           "base_branch": {
             "type": "string"
           },
+          "repo_path": {
+            "type": "string"
+          },
           "worktree_path": {
             "type": "string"
+          },
+          "tmux_session": {
+            "type": ["string", "null"]
           },
           "pr_number": {
             "type": ["integer", "null"]
