@@ -1,0 +1,31 @@
+{
+  "job_id": "uuid-or-timestamped-id",
+  "created_at": "ISO-8601",
+  "submitted_by": "ross",
+  "repo": {
+    "url": "git-url-or-local-path",
+    "ref": "branch-or-commit"
+  },
+  "task": {
+    "type": "agent_run | build | test | lint | summarise | embeddings",
+    "command": "shell command or agent entrypoint",
+    "inputs": [],
+    "outputs": ["summary.md", "diff.patch"]
+  },
+  "policy": {
+    "risk_level": "low | medium | high",
+    "requires_approval": false,
+    "max_cost_gbp": 2.0,
+    "max_runtime_minutes": 60
+  },
+  "routing": {
+    "preferred_capabilities": ["agent_runs"],
+    "allow_nodes": [],
+    "deny_nodes": []
+  },
+  "paths": {
+    "lab_root": "/Volumes/Lab",
+    "artefact_dir": "/Volumes/Lab/artefacts/{job_id}",
+    "log_file": "/Volumes/Lab/logs/{job_id}.jsonl"
+  }
+}

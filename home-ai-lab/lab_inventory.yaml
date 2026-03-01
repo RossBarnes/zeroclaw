@@ -1,0 +1,60 @@
+lab:
+  timezone: "Europe/London"
+  shared_volume_mount: "/Volumes/Lab"
+
+nodes:
+  - id: "m4-core-2tb"
+    type: "mac_mini"
+    chip: "M4"
+    ram_gb: 16
+    storage_gb: 2000
+    always_on: true
+    roles: ["core_services", "orchestrator", "shared_storage", "index", "monitoring"]
+    capabilities: ["dispatch", "queue", "registry", "logging", "light_worker"]
+    notes: "Keep boring. No experimental inference."
+
+  - id: "m4-worker"
+    type: "mac_mini"
+    chip: "M4"
+    ram_gb: 16
+    storage_gb: 256
+    always_on: true
+    roles: ["primary_worker", "inference_sandbox"]
+    capabilities: ["agent_runs", "build", "test", "batch", "local_inference"]
+
+  - id: "m2-console"
+    type: "mac_mini"
+    chip: "M2"
+    ram_gb: 16
+    storage_gb: 256
+    always_on: true
+    roles: ["interactive_console", "secondary_worker"]
+    capabilities: ["submit_jobs", "approve", "monitor", "dev", "burst_compute"]
+
+  - id: "imac-studio"
+    type: "imac"
+    chip: "Apple_Silicon"
+    ram_gb: 16
+    storage_gb: 512
+    always_on: true
+    roles: ["studio", "optional_worker"]
+    capabilities: ["summarise", "content_transforms"]
+    constraints: ["do_not_run_heavy_when_recording"]
+
+  - id: "imac-house"
+    type: "imac"
+    chip: "Apple_Silicon"
+    ram_gb: 8
+    storage_gb: 256
+    always_on: true
+    roles: ["light_terminal", "monitor_display", "optional_worker"]
+    capabilities: ["dashboard", "light_tasks"]
+
+  - id: "imac-legacy"
+    type: "imac"
+    chip: "intel_or_old"
+    ram_gb: 8
+    storage_gb: 256
+    always_on: true
+    roles: ["terminal", "optional_worker"]
+    capabilities: ["dashboard", "very_light_tasks"]

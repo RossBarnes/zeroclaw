@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Lab Status Server launchd daemon (run on core node only).
+
+  Install:
+    cp com.homelab.status.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.homelab.status.plist
+
+  Access dashboard at http://<core-ip>:8420/
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.homelab.status</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>-m</string>
+        <string>lab.status_server</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/ross/repos/home-ai-lab</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>LAB_ROOT</key>
+        <string>/Volumes/Lab</string>
+        <key>PYTHONPATH</key>
+        <string>/Users/ross/repos/home-ai-lab</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/homelab-status.stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/homelab-status.stderr.log</string>
+</dict>
+</plist>

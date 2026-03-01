@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Lab Worker launchd daemon.
+
+  Install:
+    cp com.homelab.worker.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.homelab.worker.plist
+
+  Uninstall:
+    launchctl unload ~/Library/LaunchAgents/com.homelab.worker.plist
+
+  Customise ProgramArguments per node:
+    - m4-worker:   caps = agent_runs,build,test,batch
+    - m2-console:  caps = submit_jobs,dev,burst_compute
+    - imac-studio: caps = summarise,content_transforms
+    - imac-house:  caps = dashboard,light_tasks
+    - imac-legacy: caps = dashboard,very_light_tasks
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.homelab.worker</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>-m</string>
+        <string>lab.cli.run_worker</string>
+        <string>--caps</string>
+        <string>agent_runs,build,test</string>
+        <string>--poll</string>
+        <string>2</string>
+        <string>--daily-limit</string>
+        <string>50</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/ross/repos/home-ai-lab</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>LAB_ROOT</key>
+        <string>/Volumes/Lab</string>
+        <key>PYTHONPATH</key>
+        <string>/Users/ross/repos/home-ai-lab</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/homelab-worker.stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/homelab-worker.stderr.log</string>
+
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+</dict>
+</plist>
