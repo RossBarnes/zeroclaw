@@ -21,3 +21,6 @@ credentials.json
 
 # clawdbot runtime artifacts (logs are local, prompts and registry are tracked)
 .clawdbot/logs/
+
+# jobqueue runtime data (generated at runtime, not tracked)
+.clawdbot/jobqueue_data/
